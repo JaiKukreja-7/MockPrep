@@ -1,26 +1,456 @@
 @import "tailwindcss";
 
+/* ============================================================
+   MockPrep — design tokens
+   Adapted from the IGNITE® system (igniteagency.com)
+   Two scales share one type system:
+     --d-*  display scale  → landing page
+     --u-*  UI scale       → dashboard and app screens
+
+   Fonts are self-hosted via next/font/local (see app/fonts.ts).
+   Archivo is pinned to the wdth 62 / wght 600 instance — the one
+   display cut. Switzer is the variable face, 100–900.
+   ============================================================ */
+
+/* ============================================================
+   THEME — the Tailwind config. In Tailwind v4 the config lives
+   here, not in a tailwind.config.js. Every value below becomes
+   a utility; `initial` deletes a default namespace so the
+   off-system option cannot be typed by accident.
+   ============================================================ */
+
+@theme {
+
+  /* ---- Families ----
+     Only two. `--font-serif` and `--font-mono` are deleted so a
+     third typeface cannot enter through a utility class. */
+  --font-serif: initial;
+  --font-mono:  initial;
+
+  --font-display: var(--font-archivo), "Anton", Impact, sans-serif;
+  --font-body:    var(--font-switzer), "Geist", system-ui, sans-serif;
+  --font-sans:    var(--font-body);
+
+  /* Display is ALWAYS: uppercase, 600, -0.01em, 0.85 line-height.
+     Never vary these. The consistency is the identity. */
+  --font-weight-display: 600;
+  --tracking-display:    -0.01em;
+  --leading-display:     0.85;
+
+  /* ---- Type scale ----
+     The default Tailwind scale is deleted. text-sm / text-3xl and
+     friends do not exist; only the two token scales below do.
+     Nothing sits between --u-lg and --u-display. Keep the gap. */
+  --text-*: initial;
+
+  /* Display scale (landing page) — fluid, 320→1920 interpolation. */
+  --text-d-eyebrow:  1.05rem;                      /* 16.8px */
+  --text-d-body:     1.05rem;                      /* 16.8px */
+  --text-d-body-lg:  1.375rem;                     /* 22px   */
+  --text-d-mid:      2.375rem;                     /* 38px — project row titles only */
+  --text-d-hero:     clamp(4rem, 13.6vw, 12.2rem); /* → 195px @1440 */
+  --text-d-setpiece: 27vw;                         /* section wordmarks, e.g. "TESTIMONIALS" */
+
+  /* UI scale (dashboard) — same cliff, compressed. 12px → 64px. */
+  --text-u-micro:    0.75rem;                      /* 12px — table meta only */
+  --text-u-eyebrow:  0.8125rem;                    /* 13px */
+  --text-u-body:     0.9375rem;                    /* 15px */
+  --text-u-lg:       1.25rem;                      /* 20px */
+  --text-u-display:  4rem;                         /* 64px — the one big number per screen */
+
+  /* ---- Colour ----
+     The stock palette is deleted. There is no zinc-500 to reach
+     for, so there is no grey body text. Black, white, one accent. */
+  --color-*: initial;
+
+  --color-transparent:   transparent;
+  --color-current:       currentColor;
+  --color-black:         #000000;
+  --color-white:         #FFFFFF;
+
+  --color-bg:            #FFFFFF;
+  --color-bg-alt:        #000000;
+  --color-bg-secondary:  #EEEEEE;
+  --color-ink:           #000000;  /* --text         in the source tokens */
+  --color-ink-inverse:   #FFFFFF;  /* --text-inverse in the source tokens */
+  --color-ink-muted:     rgba(255, 255, 255, 0.6);  /* dark backgrounds ONLY */
+  --color-accent:        #FF3454;
+  --color-accent-text:   #FFFFFF;
+  --color-rule:          #CCCCCC;  /* 1px structural rules — never text */
+
+  /* Reserved for form validation only. Never for scores. */
+  --color-success:       #027A48;
+  --color-error:         #FF5C76;
+
+  /* ---- Radius ----
+     4px for surfaces, 320px for anything interactive.
+     Nothing between: the intermediate steps are deleted. */
+  --radius-*: initial;
+  --radius-surface: 4px;
+  --radius-pill:    320px;
+
+  /* ---- Elevation ----
+     Depth is flat colour blocks. Every shadow utility is deleted. */
+  --shadow-*:       initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*:  initial;
+  --text-shadow-*:  initial;
+
+  /* ---- Layout ----
+     The stock container scale is kept — it is sizing, not styling, and
+     max-w-2xl carries no design opinion. --container-page is the token. */
+  --container-page: 1296px;
+}
+
+/* ============================================================
+   TOKENS — the source variables, verbatim, for hand-written CSS.
+   Spacing is not redeclared here: Tailwind's 4px base already
+   maps 1:1 onto --s-1 … --s-36 (p-6 === --s-6 === 24px).
+   ============================================================ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+
+  /* ---- Families ---- */
+  --font-display: var(--font-archivo), "Anton", Impact, sans-serif;
+  --font-body:    var(--font-switzer), "Geist", system-ui, sans-serif;
+
+  --display-weight:   600;
+  --display-tracking: -0.01em;
+  --display-leading:  0.85;
+
+  /* ---- Display scale ---- */
+  --d-eyebrow:  1.05rem;
+  --d-body:     1.05rem;
+  --d-body-lg:  1.375rem;
+  --d-mid:      2.375rem;
+  --d-hero:     clamp(4rem, 13.6vw, 12.2rem);
+  --d-setpiece: 27vw;
+
+  /* ---- UI scale ---- */
+  --u-eyebrow:  0.8125rem;
+  --u-micro:    0.75rem;
+  --u-body:     0.9375rem;
+  --u-lg:       1.25rem;
+  --u-display:  4rem;
+
+  /* ---- Colour ---- */
+  --bg:            #FFFFFF;
+  --bg-alt:        #000000;
+  --bg-secondary:  #EEEEEE;
+  --text:          #000000;
+  --text-inverse:  #FFFFFF;
+  --text-muted:    rgba(255, 255, 255, 0.6);  /* dark backgrounds ONLY */
+  --accent:        #FF3454;
+  --accent-text:   #FFFFFF;
+
+  /* Reserved for form validation only. Never for scores. */
+  --success:       #027A48;
+  --error:         #FF5C76;
+
+  /* ---- Heat ramp ----
+     A single achromatic hue at five steps, for encoding magnitude in a
+     data grid where area is fixed and intensity is the only channel left.
+     DATA ONLY. This is not a licence to tint text: hierarchy in type is
+     still size, never opacity. Five steps, so the eye can count them
+     without a legend. */
+  --heat-0: var(--bg-secondary);
+  --heat-1: rgba(0, 0, 0, 0.25);
+  --heat-2: rgba(0, 0, 0, 0.50);
+  --heat-3: rgba(0, 0, 0, 0.75);
+  --heat-4: rgba(0, 0, 0, 1);
+
+  /* ---- Placeholder ----
+     The one sanctioned exception to "no grey text". A placeholder is
+     affordance, not content: at full black it reads as a filled value.
+     Nothing else in the system may use these two. Hierarchy everywhere
+     else is still size, never opacity. */
+  --placeholder:         rgba(0, 0, 0, 0.4);
+  --placeholder-inverse: var(--text-muted);
+
+  /* ---- Borders ----
+     Two weights. 2px = interactive, 1px = structural. */
+  --border-rule:        1px solid #CCCCCC;
+  --border-interactive: 2px solid currentColor;
+
+  /* ---- Radius ---- */
+  --radius-surface: 4px;
+  --radius-pill:    320px;
+  --radius-slab:    0 0 64px 64px;
+
+  /* ---- Spacing: 4px base ---- */
+  --s-1:  4px;   --s-2:  8px;   --s-3:  12px;  --s-4:  16px;
+  --s-5:  20px;  --s-6:  24px;  --s-7:  28px;  --s-8:  32px;
+  --s-10: 40px;  --s-12: 48px;  --s-14: 56px;  --s-16: 64px;
+  --s-20: 80px;  --s-24: 96px;  --s-28: 112px; --s-32: 128px;
+  --s-36: 144px;
+
+  /* ---- Layout ---- */
+  --gutter:          5vw;
+  --container:       1296px;
+  --grid-columns:    12;
+  --grid-gap-col:    32px;
+  --grid-gap-row:    64px;
+  --section-sm:      48px;
+  --section-md:      80px;
+  --section-lg:      144px;
+
+  /* Dashboard runs tighter than the landing page */
+  --app-gutter:      32px;
+  --app-section:     48px;
+
+  /* ---- Elevation ----
+     Effectively unused. Depth is flat colour blocks. */
+  --shadow: none;
+
+  /* ---- Surface ----
+     Which of the two grounds a subtree sits on. Primitives read these
+     instead of hard-coding black or white, so a single component
+     inverts correctly on --bg and on --bg-alt with no light/dark
+     variant. Every hover and fill state resolves through this pair. */
+  --surface:          var(--bg);
+  --surface-contrast: var(--text);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* The black block. Sets the ground, flips the text, and re-points
+   --surface so every primitive inside it inverts by itself. */
+.surface-dark {
+  --surface:          var(--bg-alt);
+  --surface-contrast: var(--text-inverse);
+  --placeholder:      var(--placeholder-inverse);
+  background: var(--bg-alt);
+  color: var(--text-inverse);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ============================================================
+   BASE
+   ============================================================ */
+
+@layer base {
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: var(--u-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Focus is a 2px accent ring — the interactive border weight,
+     offset so it reads outside a pill rather than through it. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+
+  /* Numerals are tabular by default. Proportional figures are the
+     exception, not the rule — nothing here has to remember to opt in. */
+  table,
+  time,
+  output,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ============================================================
+   RULES — these carry the look more than the values above.
+   The primitives in components/ui compose these classes.
+   ============================================================ */
+
+@layer components {
+
+  /* 1. Uppercase is a style layer, never in the copy.
+        Author sentence case in markup; transform in CSS. */
+  .display,
+  .eyebrow {
+    text-transform: uppercase;
+  }
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
+  }
+
+  /* 2. Eyebrow is bare text. No rule, no dot, no colour change.
+        It works purely on scale contrast with the display below it. */
+  .eyebrow {
+    font-family: var(--font-body);
+    font-size: var(--u-eyebrow);
+    font-weight: 400;
+    letter-spacing: 0.03em;
+    line-height: 1.5;
+    color: inherit;
+  }
+
+  /* 3. Rows, not cards. Structure comes from 1px rules. */
+  .row {
+    display: flex;
+    gap: var(--s-8);
+    align-items: center;
+    padding: var(--s-6) 0;
+    border-bottom: var(--border-rule);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .row-list {
+    border-top: var(--border-rule);
+  }
+
+  /* 4. Pills for anything interactive or categorical.
+        Borders inherit currentColor, so a pill flips itself on
+        --bg-alt without a variant. */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    border: var(--border-interactive);
+    border-radius: var(--radius-pill);
+    padding: var(--s-2) var(--s-4);
+    text-transform: uppercase;
+    font-family: var(--font-body);
+    font-size: var(--u-eyebrow);
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  /* Buttons carry sentence-case copy — uppercase belongs to
+     display and eyebrow only. */
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-body);
+    font-size: var(--u-body);
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 120ms linear, color 120ms linear,
+                border-color 120ms linear;
+  }
+
+  .button-filled {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 12px 28px;
+    height: 48px;
+  }
+
+  .button-outline {
+    background: transparent;
+    border: var(--border-interactive);
+    border-radius: var(--radius-pill);
+    padding: 20px 40px;
+    height: 68px;
+  }
+
+  /* Hover swaps flat colour blocks. No shadow, no lift.
+     Both hovers resolve against --surface, so the same rule reads
+     correctly on white and on the black block. */
+  .button-filled:hover:not(:disabled) {
+    background: var(--surface-contrast);
+    color: var(--surface);
+  }
+
+  /* Not `currentColor` for the fill: it would resolve against the
+     `color` set on this same rule and paint the button invisible. */
+  .button-outline:hover:not(:disabled) {
+    background: var(--surface-contrast);
+    color: var(--surface);
+  }
+
+  /* Disabled is a flat block, not reduced opacity — opacity is
+     never allowed to carry meaning. */
+  .button:disabled {
+    cursor: not-allowed;
+    background: var(--bg-secondary);
+    color: var(--text);
+    border-color: var(--bg-secondary);
+  }
+
+  /* The in-row action size. Declared after both variants so its
+     height and padding win regardless of which one it modifies.
+     Same two radii, same two border weights — only the box shrinks. */
+  .button-compact {
+    height: 40px;
+    padding: 0 var(--s-5);
+    font-size: var(--u-eyebrow);
+  }
+
+  /* Inputs are interactive, so: pill radius, 2px border. */
+  .input {
+    display: block;
+    width: 100%;
+    height: 56px;
+    padding: 0 var(--s-6);
+    background: transparent;
+    color: inherit;
+    border: var(--border-interactive);
+    border-radius: var(--radius-pill);
+    font-family: var(--font-body);
+    font-size: var(--u-body);
+    line-height: 1;
+  }
+
+  /* The sanctioned exception. --placeholder is re-pointed by
+     .surface-dark, so this one rule covers both grounds. */
+  .input::placeholder {
+    color: var(--placeholder);
+    opacity: 1;
+  }
+
+  .input:disabled {
+    cursor: not-allowed;
+    background: var(--bg-secondary);
+    border-color: var(--bg-secondary);
+  }
+
+  .input[aria-invalid="true"] {
+    border-color: var(--error);
+  }
+
+  /* 5. A 2px bar instead of underline on text links. */
+  .link-bar {
+    height: 2px;
+    background: currentColor;
+  }
+
+  /* 6. Tabular numerals everywhere a score appears. */
+  .numeric {
+    font-variant-numeric: tabular-nums;
+  }
 }
+
+/* ============================================================
+   DO NOT
+   ------------------------------------------------------------
+   - Introduce grey body text. Hierarchy is size, never opacity.
+     The sole exception is --placeholder / --placeholder-inverse, which
+     exist because a placeholder is affordance rather than content.
+     Do not reach for them anywhere else.
+   - Colour scores red or green. Rank and size carry the meaning.
+     --success / --error are for form validation only.
+   - Add radii between 4px and 320px.
+   - Add a third typeface.
+   - Add shadows to create depth.
+   - Fill the gap between --u-lg and --u-display. The cliff is the design.
+   ============================================================ */
