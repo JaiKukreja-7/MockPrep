@@ -17,6 +17,7 @@ const items = [
   { label: "Sessions", href: "/sessions", count: "sessions" },
   { label: "Reports", href: "/reports", count: "reports" },
   { label: "Question bank", href: "/questions", count: "questions" },
+  { label: "Resume", href: "/resume", count: null },
   { label: "Settings", href: "/settings", count: null },
 ] as const;
 

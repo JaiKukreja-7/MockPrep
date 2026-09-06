@@ -57,6 +57,8 @@ screen still reads as the system.
 | `/reports` | Scored rounds, ruled index, links to `/report/[id]` |
 | `/questions` | Question bank — the landing-page ruled index |
 | `/settings` | Account, sign-out, read-only caps |
+| `/resume` | Upload + past checks — **blocked on migration** |
+| `/resume/[id]` | ATS score, sub-score meters, findings — **blocked on migration** |
 | `/test` | Primitive specimen sheet |
 
 `/sessions` is where the `Table` primitive earns its place: nine columns of
@@ -175,6 +177,45 @@ All rounds `mode=voice`, score written (55/55/60/50), session `scored`,
 caught the "So, um, I guess" line on a *voice* transcript. `remainingSeconds`
 counted 600 → 588 → 571 → 561, so the 10-minute ceiling tracks.
 
+### Resume analyser (2026-09-06)
+
+PDF and DOCX uploaded, text extracted server-side in memory, audited for ATS
+compatibility on four axes — parseability, keyword coverage against a target
+role, formatting, and bullet strength — then stored as a verdict.
+
+**Nothing stores the resume text.** The upload is parsed in memory, sent to
+the analyser, and dropped. Findings may carry a short excerpt, because a
+finding that cannot point at the line it is about is useless, but excerpts are
+truncated to 160 chars and findings capped at 8, so a row cannot accumulate
+into a copy of the document. `source_chars` records the length only. The
+migration says so at the top: adding a text column there is a change of
+policy, not a schema tweak.
+
+*Verified end to end except persistence*, both formats, through the real Next
+runtime:
+
+| | PDF | DOCX |
+|---|---|---|
+| extracted | 712 chars | 727 chars |
+| ATS | 67 | 70 |
+| provider | `groq/openai/gpt-oss-120b` | `groq/openai/gpt-oss-120b` |
+| findings | 5 | 5 |
+
+On a deliberately weak test resume it caught the right things: *"Replace vague
+verbs with strong action verbs"* quoting `"Helped with a project that improved
+things for the client."`, missing quantification, and sensible keyword gaps
+for the target role. Longest excerpt stored: 66 chars, well inside the cap.
+
+**The data-policy guard was confirmed by breaking it on purpose.** Adding
+Gemini to the `resume_analysis` chain made the route table refuse to load:
+*"Routing table is unsafe: task \"resume_analysis\" is marked sensitive but
+routes to \"gemini\", whose data policy is \"trains-on-free-tier\"."* Restored,
+it loads cleanly with Groq as the only leg.
+
+`serverExternalPackages: ["pdfjs-dist", "mammoth"]` is load-bearing: bundled
+by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
+cannot resolve, and every PDF fails with "Setting up fake worker failed".
+
 ### TTS — three causes fixed (2026-09-06)
 
 Web Speech was wired but silent in Chrome. All three were real:
@@ -264,7 +305,15 @@ so mic capture, the level meter under real input, barge-in, and TTS playback are
 audio to `/api/voice/turn` from inside the authenticated page — the same request
 the transport makes, minus `MediaRecorder`. Needs a pass in real Chrome.
 
-### 3. One escalated row left in the database
+### 3. Resume analyser cannot store anything yet
+
+`supabase/migrations/20260906000000_analyses.sql` is **not applied** — no
+service-role key here. Extraction and analysis are verified working, but the
+insert, `/resume` and `/resume/[id]` are all blocked until it runs. It adds
+the `analyses` table, a restrictive RLS policy barring guests (same shape as
+voice), and an index.
+
+### 4. One escalated row left in the database
 
 The guest row used to prove the escalation still has `is_guest: false,
 daily_request_cap: 9999`. Throwaway anonymous user, hole now closed, but it can
@@ -274,14 +323,14 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Hear voice in real Chrome.** Expect a "Let the interviewer speak" button on
+1. **Apply the analyses migration**, then upload one real resume to close out
+   step 8.
+2. **Hear voice in real Chrome.** Expect a "Let the interviewer speak" button on
    the first question (autoplay), then automatic speech for questions 2 and 3,
    a pulsing dot with "The interviewer is speaking", and barge-in cutting
    playback with "You cut in — go ahead".
-2. **Build the Cloud Run relay** and point `answer_scoring`-style config at
+3. **Build the Cloud Run relay** and point `answer_scoring`-style config at
    `RelayVoiceTransport` for true speech-to-speech.
-3. **Resume analysis** — routed and policy-guarded (Groq only) but no UI or
-   upload path exists yet.
 5. **Timezone.** Dates render in the server's timezone. Fine while server-only;
    needs a per-user timezone before any of it reaches a client.
 6. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the

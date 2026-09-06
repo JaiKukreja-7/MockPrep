@@ -16,6 +16,12 @@ export type SessionStatus = "draft" | "live" | "scored" | "abandoned";
 export type Track = "consulting" | "engineering" | "product" | "general";
 export type Speaker = "interviewer" | "candidate";
 export type RoundMode = "text" | "voice";
+export type AnalysisKind = "resume";
+export type FindingCategory =
+  | "parseability"
+  | "keywords"
+  | "formatting"
+  | "bullets";
 export type TranscriptFlag = "filler" | "restated" | "no_number" | "rambled";
 
 export type UserRow = {
@@ -81,6 +87,30 @@ export type TranscriptRow = {
   created_at: string;
 };
 
+export type AnalysisRow = {
+  id: string;
+  user_id: string;
+  kind: AnalysisKind;
+  target_role: string;
+  source_name: string;
+  source_kind: "pdf" | "docx";
+  /** Length of the extracted text. The text itself is never stored. */
+  source_chars: number;
+  ats_score: number;
+  parseability: number;
+  keyword_coverage: number;
+  formatting: number;
+  bullet_strength: number;
+  keywords: { matched: string[]; missing: string[] };
+  findings: Array<{
+    category: FindingCategory;
+    title: string;
+    detail: string;
+    excerpt: string | null;
+  }>;
+  created_at: string;
+};
+
 export type FlagSummaryRow = {
   user_id: string;
   flag: TranscriptFlag;
@@ -99,6 +129,20 @@ export interface Database {
         Insert: Writable<UserRow, "created_at", "email" | "display_name" | "is_guest" | "daily_request_cap" | "daily_voice_sec_cap">;
         Update: Partial<UserRow>;
         Relationships: [];
+      };
+      analyses: {
+        Row: AnalysisRow;
+        Insert: Writable<AnalysisRow, "id" | "created_at", "kind" | "keywords" | "findings" | "source_chars">;
+        Update: Partial<AnalysisRow>;
+        Relationships: [
+          {
+            foreignKeyName: "analyses_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       llm_usage: {
         Row: LlmUsageRow;
@@ -192,6 +236,7 @@ export interface Database {
       };
     };
     Enums: {
+      analysis_kind: AnalysisKind;
       round_mode: RoundMode;
       session_status: SessionStatus;
       track: Track;
