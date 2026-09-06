@@ -53,7 +53,29 @@ screen still reads as the system.
 | `/dashboard` | Real data, empty states, 12-month heatmap |
 | `/session/[id]` | Live round, text and voice |
 | `/report/[id]` | Score, meters, transcript with flags |
+| `/sessions` | Every round, 9-column table, track filter |
+| `/reports` | Scored rounds, ruled index, links to `/report/[id]` |
+| `/questions` | Question bank — the landing-page ruled index |
+| `/settings` | Account, sign-out, read-only caps |
 | `/test` | Primitive specimen sheet |
+
+`/sessions` is where the `Table` primitive earns its place: nine columns of
+which five are numeric. Ruled rows would push the sub-scores onto a second
+line and lose the column alignment that makes them comparable. `/reports` and
+`/questions` stay on `RuledRow` — one item per row, nothing to align.
+
+Track filters are links, not client state, so the track lives in the URL and a
+filtered list can be shared and reloaded. Only tracks the user actually has
+rounds in are offered, so there are no dead filters.
+
+The question bank is derived from `rounds` rather than a table of its own:
+those rows **are** the questions this user has faced, and a separate table
+would immediately disagree with them.
+
+*Verified signed in against real data*: 8 sessions / 1 report / 24 questions,
+counts matching the sidebar; `?track=engineering` correctly empty; settings
+showing 3/60 rounds and 1/30 voice minutes with "57 rounds left" and "29 voice
+minutes left" reconciling against their caps.
 
 The signed-in shell (sidebar) is `app/(app)/layout.tsx`; each page owns its own
 72px header because the title and primary action are page-specific. Session and
@@ -260,8 +282,6 @@ no longer be corrected through the API — needs a SQL console.
    `RelayVoiceTransport` for true speech-to-speech.
 3. **Resume analysis** — routed and policy-guarded (Groq only) but no UI or
    upload path exists yet.
-4. **Sessions / Reports / Settings routes** — nav links exist and are inert
-   (`href="#"`).
 5. **Timezone.** Dates render in the server's timezone. Fine while server-only;
    needs a per-user timezone before any of it reaches a client.
 6. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the

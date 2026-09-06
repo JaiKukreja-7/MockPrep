@@ -5,13 +5,18 @@ import { usePathname } from "next/navigation";
 
 export interface AppNavProps {
   /** Live counts from the layout's query. `null` renders no count. */
-  counts: { sessions: number | null; reports: number | null };
+  counts: {
+    sessions: number | null;
+    reports: number | null;
+    questions: number | null;
+  };
 }
 
 const items = [
   { label: "Dashboard", href: "/dashboard", count: null },
   { label: "Sessions", href: "/sessions", count: "sessions" },
   { label: "Reports", href: "/reports", count: "reports" },
+  { label: "Question bank", href: "/questions", count: "questions" },
   { label: "Settings", href: "/settings", count: null },
 ] as const;
 

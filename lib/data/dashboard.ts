@@ -152,23 +152,29 @@ function buildHeatmap(startedAt: string[]): HeatmapData {
 export async function getNavCounts(): Promise<{
   sessions: number | null;
   reports: number | null;
+  questions: number | null;
 }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return { sessions: null, reports: null };
+  if (!user) return { sessions: null, reports: null, questions: null };
 
-  const [sessions, reports] = await Promise.all([
+  const [sessions, reports, questions] = await Promise.all([
     supabase.from("sessions").select("*", { count: "exact", head: true }),
     supabase
       .from("sessions")
       .select("*", { count: "exact", head: true })
       .eq("status", "scored"),
+    supabase.from("rounds").select("*", { count: "exact", head: true }),
   ]);
 
-  return { sessions: sessions.count ?? 0, reports: reports.count ?? 0 };
+  return {
+    sessions: sessions.count ?? 0,
+    reports: reports.count ?? 0,
+    questions: questions.count ?? 0,
+  };
 }
 
 export async function getDashboard(): Promise<DashboardData | null> {
