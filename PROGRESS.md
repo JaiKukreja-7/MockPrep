@@ -57,8 +57,8 @@ screen still reads as the system.
 | `/reports` | Scored rounds, ruled index, links to `/report/[id]` |
 | `/questions` | Question bank — the landing-page ruled index |
 | `/settings` | Account, sign-out, read-only caps |
-| `/resume` | Upload + past checks — **blocked on migration** |
-| `/resume/[id]` | ATS score, sub-score meters, findings — **blocked on migration** |
+| `/resume` | Upload + past checks |
+| `/resume/[id]` | ATS score, sub-score meters, findings |
 | `/test` | Primitive specimen sheet |
 
 `/sessions` is where the `Table` primitive earns its place: nine columns of
@@ -191,8 +191,7 @@ into a copy of the document. `source_chars` records the length only. The
 migration says so at the top: adding a text column there is a change of
 policy, not a schema tweak.
 
-*Verified end to end except persistence*, both formats, through the real Next
-runtime:
+*Verified end to end*, including a real upload through the form:
 
 | | PDF | DOCX |
 |---|---|---|
@@ -204,7 +203,23 @@ runtime:
 On a deliberately weak test resume it caught the right things: *"Replace vague
 verbs with strong action verbs"* quoting `"Helped with a project that improved
 things for the client."`, missing quantification, and sensible keyword gaps
-for the target role. Longest excerpt stored: 66 chars, well inside the cap.
+for the target role.
+
+A real upload through the form produced ATS 68 (parseability 90, keywords 55,
+formatting 70, bullets 55), 8 findings, 20 keywords. The stored row was
+inspected directly: **no column holds the resume text** (longest string under
+300 chars), `source_chars: 712` records length only, and the six excerpts came
+to 293 chars against 712 extracted. Guests are barred — an insert with a guest
+JWT fails `42501 ... violates row-level security policy
+"analyses_require_account"`, and reads return empty.
+
+**Known consequence of excerpts:** a finding *about* the contact line quotes
+the contact line, so this row contains `0400 000 000`. That is "what the
+analysis needs" by the stated rule, but it does mean a phone number or email
+can persist when the finding concerns contact formatting. Redacting
+contact-shaped patterns from excerpts would fix it and would also gut the
+parsing finding that depends on them — worth a decision rather than a silent
+change.
 
 **The data-policy guard was confirmed by breaking it on purpose.** Adding
 Gemini to the `resume_analysis` chain made the route table refuse to load:
@@ -305,15 +320,7 @@ so mic capture, the level meter under real input, barge-in, and TTS playback are
 audio to `/api/voice/turn` from inside the authenticated page — the same request
 the transport makes, minus `MediaRecorder`. Needs a pass in real Chrome.
 
-### 3. Resume analyser cannot store anything yet
-
-`supabase/migrations/20260906000000_analyses.sql` is **not applied** — no
-service-role key here. Extraction and analysis are verified working, but the
-insert, `/resume` and `/resume/[id]` are all blocked until it runs. It adds
-the `analyses` table, a restrictive RLS policy barring guests (same shape as
-voice), and an index.
-
-### 4. One escalated row left in the database
+### 3. One escalated row left in the database
 
 The guest row used to prove the escalation still has `is_guest: false,
 daily_request_cap: 9999`. Throwaway anonymous user, hole now closed, but it can
@@ -323,13 +330,11 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Apply the analyses migration**, then upload one real resume to close out
-   step 8.
-2. **Hear voice in real Chrome.** Expect a "Let the interviewer speak" button on
+1. **Hear voice in real Chrome.** Expect a "Let the interviewer speak" button on
    the first question (autoplay), then automatic speech for questions 2 and 3,
    a pulsing dot with "The interviewer is speaking", and barge-in cutting
    playback with "You cut in — go ahead".
-3. **Build the Cloud Run relay** and point `answer_scoring`-style config at
+2. **Build the Cloud Run relay** and point `answer_scoring`-style config at
    `RelayVoiceTransport` for true speech-to-speech.
 5. **Timezone.** Dates render in the server's timezone. Fine while server-only;
    needs a per-user timezone before any of it reaches a client.
