@@ -213,13 +213,28 @@ to 293 chars against 712 extracted. Guests are barred — an insert with a guest
 JWT fails `42501 ... violates row-level security policy
 "analyses_require_account"`, and reads return empty.
 
-**Known consequence of excerpts:** a finding *about* the contact line quotes
-the contact line, so this row contains `0400 000 000`. That is "what the
-analysis needs" by the stated rule, but it does mean a phone number or email
-can persist when the finding concerns contact formatting. Redacting
-contact-shaped patterns from excerpts would fix it and would also gut the
-parsing finding that depends on them — worth a decision rather than a silent
-change.
+**Contact details are redacted from excerpts** (2026-09-06). The first run
+stored `0400 000 000`, because a finding *about* the contact line quoted the
+contact line. Two changes, belt and braces:
+
+1. The analyser is told never to quote a phone number, email or URL, and to
+   describe the pattern instead where the problem is in those characters.
+2. `lib/resume/redact.ts` replaces anything that slips through with
+   `[phone]`, `[email]`, `[url]` — **at write time**, before the row is built.
+   Redacting on display would leave the real value in the table, which is the
+   thing being avoided.
+
+Redaction runs *before* truncation: cutting to 160 chars first can slice an
+email in half, leaving a fragment the pattern no longer matches. It errs
+toward over-redaction, and the length rule (9+ digits, or 8+ with a `+`, `0`
+or bracket prefix) is what keeps `2023-2026`, `WAM 78` and `340,000` intact —
+16 cases checked.
+
+*Verified*: the pre-existing row was backfilled (`0400 000 000` → `[phone]`),
+and a fresh upload scanned clean — **zero phone-like runs, emails or URLs
+across every stored row**. The prompt change did the work on its own that
+time: the parseability finding came back as *"Phone number runs digits
+together"* with no excerpt at all, so the redactor never had to fire.
 
 **The data-policy guard was confirmed by breaking it on purpose.** Adding
 Gemini to the `resume_analysis` chain made the route table refuse to load:

@@ -10,8 +10,18 @@
 -- and caps the number of findings, so the row can never accumulate into a
 -- copy of the document. `source_chars` records the length only.
 --
--- Anything added here that stores more of the document is a change of policy,
--- not a schema tweak.
+-- SECOND POLICY: excerpts carry no contact details.
+--
+-- Phone numbers, email addresses and URLs are replaced with [phone], [email]
+-- and [url] before the row is built — at write time, in
+-- lib/resume/redact.ts, not when the finding is rendered. Redacting on
+-- display would leave the real value sitting in this table, which is the
+-- thing being avoided. The analyser is separately told to describe a contact
+-- formatting problem rather than quote it, so the redactor is a backstop
+-- rather than the first line.
+--
+-- Anything added here that stores more of the document, or that widens what
+-- an excerpt may contain, is a change of policy, not a schema tweak.
 -- ============================================================================
 
 create type public.analysis_kind as enum ('resume');

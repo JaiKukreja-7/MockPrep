@@ -1,6 +1,7 @@
 import "server-only";
 import { runTask } from "../index";
 import { parseJson } from "../json";
+import { redactContactDetails } from "@/lib/resume/redact";
 
 export type FindingCategory =
   | "parseability"
@@ -19,7 +20,11 @@ export interface Finding {
   category: FindingCategory;
   title: string;
   detail: string;
-  /** A short quote showing the problem. Truncated hard — see below. */
+  /**
+   * A short quote showing the problem, with contact details redacted and the
+   * length capped. Both happen here, before the value is ever returned to a
+   * caller that could store it.
+   */
   excerpt: string | null;
 }
 
@@ -41,6 +46,9 @@ export interface ResumeAnalysis {
  * exist — but eight findings of 160 characters is roughly 1.3KB, far short of
  * a reconstructable copy of the document. Raising these raises how much of a
  * stranger's resume the database keeps.
+ *
+ * Excerpts are additionally stripped of phone numbers, emails and URLs by
+ * redactContactDetails before they leave this function.
  */
 const MAX_FINDINGS = 8;
 const MAX_EXCERPT_CHARS = 160;
@@ -101,6 +109,11 @@ export async function analyseResume({
       `  title:   one short imperative sentence, sentence case\n` +
       `  detail:  one sentence on why it costs them\n` +
       `  excerpt: a SHORT quote from the resume showing the problem, or null\n\n` +
+      `Never quote a phone number, email address or URL. Where the problem IS ` +
+      `in those characters — spacing, a missing country code, an inconsistent ` +
+      `format — describe the pattern in detail and set excerpt to null. Say ` +
+      `"the phone number runs the digits together" rather than reproducing ` +
+      `them.\n\n` +
       `Return exactly this shape:\n` +
       `{"parseability":0,"keyword_coverage":0,"formatting":0,` +
       `"bullet_strength":0,"keywords":{"matched":[],"missing":[]},` +
@@ -126,9 +139,14 @@ export async function analyseResume({
             : "formatting",
           title: typeof entry.title === "string" ? entry.title.trim() : "",
           detail: typeof entry.detail === "string" ? entry.detail.trim() : "",
+          // Redact BEFORE truncating: cutting first can slice an email in
+          // half, leaving a fragment the pattern no longer matches.
           excerpt:
             typeof entry.excerpt === "string" && entry.excerpt.trim()
-              ? entry.excerpt.trim().slice(0, MAX_EXCERPT_CHARS)
+              ? redactContactDetails(entry.excerpt.trim()).slice(
+                  0,
+                  MAX_EXCERPT_CHARS,
+                )
               : null,
         }))
         .filter((f) => f.title.length > 0)
