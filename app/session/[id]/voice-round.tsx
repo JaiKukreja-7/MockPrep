@@ -72,14 +72,15 @@ export function VoiceRound({
       if (spokenForRef.current === questionId) return;
       spokenForRef.current = questionId;
 
-      const started = await speak(question, {
+      const outcome = await speak(question, {
         interrupt: false,
         onStart: () => setSpeaking(true),
         onEnd: () => setSpeaking(false),
       });
 
-      // Autoplay refused it. Let the reader unlock audio with one tap.
-      if (!started) {
+      // Only a silent refusal earns the prompt. "cancelled" means barge-in or
+      // teardown stopped it deliberately, and audio plainly works.
+      if (outcome === "blocked") {
         spokenForRef.current = null;
         setNeedsGesture(true);
       }
@@ -87,15 +88,25 @@ export function VoiceRound({
     [],
   );
 
+  /* Speak when the question changes.
+
+     Deliberately no cleanup here. Returning stopSpeaking() would fire on every
+     question change, and a question change is exactly the moment an
+     acknowledgement is mid-sentence — it would cut its own bridge line off
+     before the next question started. Cancellation belongs to teardown only,
+     in the effect below.
+
+     readQuestion only sets state from speech-event callbacks (onstart/onend)
+     and from an awaited result, never synchronously during this effect; the
+     lint rule cannot see through the promise. */
   useEffect(() => {
-    /* readQuestion only sets state from speech-event callbacks (onstart /
-       onend) and from an awaited result — never synchronously during this
-       effect. The rule cannot see through the promise, and speaking when the
-       question changes is exactly the external side effect an effect is for. */
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void readQuestion(current.question, current.id);
-    return () => stopSpeaking();
   }, [current.id, current.question, readQuestion]);
+
+  /* Round teardown: leaving the session kills the whole queue, so speech
+     never carries into the next round or the report. */
+  useEffect(() => () => stopSpeaking(), []);
 
   /** One gesture: unlocks audio, arms the mic, reads the question. */
   const enableSound = useCallback(async () => {

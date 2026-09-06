@@ -166,8 +166,14 @@ Web Speech was wired but silent in Chrome. All three were real:
    wired-but-dead. `speak()` now reports whether audio actually started
    (`onstart` raced against a 900ms timer) and `primeSpeech()` burns a muted
    utterance inside a real click handler to unlock the document.
-3. **Chrome's ~15s cutoff.** Synthesis stops mid-utterance unless nudged;
-   `resume()` is pulsed every 10s while speech is in flight.
+3. **Chrome's ~15s cutoff.** Synthesis stops part-way through a long
+   utterance. A 10s `resume()` pulse did **not** hold it — questions 2 and 3
+   still died midway in real Chrome, because they carry an acknowledgement in
+   front of them and run longer than question 1. Replaced with chunking:
+   `chunkForSpeech()` splits at sentence boundaries into segments under 180
+   chars, and each segment's `onend` starts the next through a single queue.
+   Short utterances never reach the cutoff, so the bug stops existing rather
+   than being papered over.
 
 Also found: **barge-in could never have worked** — the analyser lived inside
 `MediaRecorder`, so the mic only listened *while recording*, never while the
@@ -179,6 +185,21 @@ question, putting three different strings on screen (model paraphrase in the
 caption, verbatim question in the heading, previous question in the transcript).
 `interviewerTurn` now returns only a bridge sentence; `nextQuestion` travels
 separately, verbatim from the database.
+
+A cancel bumps a generation counter that stale chunk callbacks check, so
+barge-in kills the **whole remaining queue** rather than pausing and resuming
+with the next chunk. `speak()` resolves `"spoke" | "blocked" | "cancelled"`
+rather than a boolean — conflating "cancelled" with "did not start" popped a
+"tap to hear" prompt every time barge-in fired. `speechSynthesis.cancel()` also
+runs on round teardown and on `pagehide`, so a queue never survives into the
+next round.
+
+*Verified at runtime* (synthesis events fire in the pane even without audio
+out): chunking is lossless across five samples including a 400-char
+comma-only sentence and text with no punctuation at all, longest chunk 179;
+chunks are fed one at a time rather than dumped; and cancelling after chunk 2
+of 9 left the other **7 suppressed** four seconds later, resolving
+`"cancelled"`.
 
 *Verified on a live turn*: acknowledgement contained no question mark;
 `nextQuestion` matched round 2's row exactly; logged interviewer line matched

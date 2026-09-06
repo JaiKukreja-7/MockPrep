@@ -66,8 +66,8 @@ export function createSttTtsTransport(): VoiceTransport {
 /* ==========================================================================
    TEXT TO SPEECH
    --------------------------------------------------------------------------
-   Two things make Web Speech silently do nothing in Chrome, and this module
-   exists to defuse both:
+   Three things make Web Speech misbehave in Chrome, and this module exists to
+   defuse all three:
 
    1. getVoices() is empty on first call. Chrome populates the list
       asynchronously and fires `voiceschanged`. An utterance queued before
@@ -78,9 +78,97 @@ export function createSttTtsTransport(): VoiceTransport {
       has had a user gesture, and it fails SILENTLY — no exception, no
       onerror, `speaking` just stays false. primeSpeech() burns a muted
       utterance inside a real gesture handler to unlock the document, and
-      speak() reports whether audio actually started so the UI can ask for a
-      gesture when it did not.
+      speak() resolves with an explicit outcome so the UI can tell a silent
+      refusal apart from a deliberate interruption.
+
+   3. Chrome stops synthesising part-way through a long utterance, at roughly
+      fifteen seconds. Pulsing resume() does not reliably hold it. Instead,
+      text is split at sentence boundaries into segments short enough never to
+      reach the cutoff, and each segment's onend starts the next. Short
+      utterances simply do not hit the bug, so it stops existing rather than
+      being papered over.
    ========================================================================== */
+
+/** Comfortably under the cutoff at normal speaking rate. */
+const MAX_CHUNK_CHARS = 180;
+
+/**
+ * Splits text into speakable segments.
+ *
+ * Sentences first, because a break mid-sentence is audible. Sentences are
+ * then packed greedily so short ones travel together, and any single sentence
+ * longer than the limit is broken at a clause boundary, then a word boundary,
+ * and only as a last resort mid-word.
+ */
+export function chunkForSpeech(
+  text: string,
+  max: number = MAX_CHUNK_CHARS,
+): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  if (trimmed.length <= max) return [trimmed];
+
+  const sentences = trimmed.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [
+    trimmed,
+  ];
+
+  const chunks: string[] = [];
+  let buffer = "";
+
+  for (const raw of sentences) {
+    const sentence = raw.trim();
+    if (!sentence) continue;
+
+    if (sentence.length > max) {
+      if (buffer) {
+        chunks.push(buffer);
+        buffer = "";
+      }
+      chunks.push(...splitLongSentence(sentence, max));
+      continue;
+    }
+
+    const candidate = buffer ? `${buffer} ${sentence}` : sentence;
+    if (candidate.length <= max) {
+      buffer = candidate;
+    } else {
+      if (buffer) chunks.push(buffer);
+      buffer = sentence;
+    }
+  }
+
+  if (buffer) chunks.push(buffer);
+  return chunks;
+}
+
+function splitLongSentence(sentence: string, max: number): string[] {
+  const parts: string[] = [];
+  let rest = sentence;
+
+  while (rest.length > max) {
+    const window = rest.slice(0, max);
+    let cut = Math.max(
+      window.lastIndexOf(", "),
+      window.lastIndexOf("; "),
+      window.lastIndexOf(": "),
+      window.lastIndexOf(" — "),
+    );
+    // Include the punctuation itself in the spoken segment.
+    if (cut > 0) cut += 1;
+    if (cut <= 0) cut = window.lastIndexOf(" ");
+    // A single unbroken token longer than the limit: cut it rather than
+    // emit something that will be truncated by the browser instead.
+    if (cut <= 0) cut = max;
+
+    parts.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+/* -------------------------------------------------------------- voices --- */
 
 let voicesPromise: Promise<SpeechSynthesisVoice[]> | null = null;
 
@@ -124,25 +212,111 @@ function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null 
   );
 }
 
-let primed = false;
+/* --------------------------------------------------------------- queue --- */
 
 /**
- * Unlocks speech for this document. MUST be called synchronously inside a
- * real user gesture handler — a click, not a promise callback after one.
+ * Why this is three states and not a boolean: "did not start" conflates a
+ * browser that silently refused with an utterance the candidate deliberately
+ * talked over. Treating the second as the first pops a "tap to hear" prompt
+ * every time barge-in fires, which is precisely backwards.
  */
-export function primeSpeech(): void {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  const warmup = new SpeechSynthesisUtterance(" ");
-  warmup.volume = 0;
-  window.speechSynthesis.speak(warmup);
-  window.speechSynthesis.resume();
-  primed = true;
-  void whenVoicesReady();
+export type SpeakOutcome = "spoke" | "blocked" | "cancelled";
+
+interface QueuedSpeech {
+  chunks: string[];
+  onStart?: () => void;
+  onEnd?: () => void;
+  settle: (outcome: SpeakOutcome) => void;
+  started: boolean;
+  finished: boolean;
 }
 
-export function isSpeechPrimed(): boolean {
-  return primed;
+let queue: QueuedSpeech[] = [];
+let active: QueuedSpeech | null = null;
+let chunkIndex = 0;
+
+/**
+ * Bumped by every cancel. Chunk callbacks compare against it and bail out if
+ * they are stale, which is what stops a cancelled utterance from scheduling
+ * its next chunk — otherwise barge-in would pause and then resume with the
+ * remainder of the queue.
+ */
+let generation = 0;
+
+function finishActive(outcome: SpeakOutcome) {
+  if (!active || active.finished) return;
+  active.finished = true;
+  active.onEnd?.();
+  active.settle(outcome);
+  active = null;
+  chunkIndex = 0;
 }
+
+function pump() {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+  if (!active) {
+    active = queue.shift() ?? null;
+    chunkIndex = 0;
+    if (!active) return;
+  }
+
+  if (chunkIndex >= active.chunks.length) {
+    finishActive(active.started ? "spoke" : "blocked");
+    pump();
+    return;
+  }
+
+  const synth = window.speechSynthesis;
+  const current = active;
+  const myGeneration = generation;
+  const isFirstChunk = chunkIndex === 0;
+
+  const utterance = new SpeechSynthesisUtterance(current.chunks[chunkIndex]);
+  const voice = pickVoice(cachedVoices);
+  if (voice) utterance.voice = voice;
+  utterance.rate = 1.05;
+
+  utterance.onstart = () => {
+    if (myGeneration !== generation) return;
+    if (!current.started) {
+      current.started = true;
+      current.onStart?.();
+    }
+  };
+
+  utterance.onend = () => {
+    // Stale means cancelled. Do NOT advance the queue.
+    if (myGeneration !== generation) return;
+    chunkIndex += 1;
+    pump();
+  };
+
+  utterance.onerror = () => {
+    if (myGeneration !== generation) return;
+    finishActive(current.started ? "cancelled" : "blocked");
+    pump();
+  };
+
+  synth.speak(utterance);
+
+  if (isFirstChunk) {
+    // Autoplay refusal is silent: no error, no onstart, speaking stays false.
+    // If nothing has begun shortly after queueing, give up on this utterance
+    // so the UI can surface a "tap to hear" affordance.
+    setTimeout(() => {
+      if (myGeneration !== generation) return;
+      if (!current.started && !synth.speaking) {
+        finishActive("blocked");
+        pump();
+      }
+    }, 900);
+  }
+}
+
+let cachedVoices: SpeechSynthesisVoice[] = [];
+
+/* --------------------------------------------------------------- api ----- */
 
 export interface SpeakOptions {
   /** Cancel whatever is playing first. False queues behind it. */
@@ -152,78 +326,70 @@ export interface SpeakOptions {
 }
 
 /**
- * Speaks `text`. Resolves true if audio actually started, false if the
- * browser silently refused — which is the caller's cue to ask for a gesture.
+ * Speaks `text`, split into chunks under the cutoff.
+ *
+ * Resolves "spoke" on success, "blocked" when the browser silently refused
+ * (the caller's cue to ask for a gesture), or "cancelled" when something
+ * stopped it — barge-in, a new utterance, or teardown.
  */
-export function speak(text: string, options: SpeakOptions = {}): Promise<boolean> {
+export function speak(
+  text: string,
+  options: SpeakOptions = {},
+): Promise<SpeakOutcome> {
   if (typeof window === "undefined" || !window.speechSynthesis || !text.trim()) {
     // Deferred, not called inline: a caller invoking speak() from an effect
-    // would otherwise get a setState during render on this path only, which
-    // is exactly the kind of inconsistency that is hard to find later.
-    return Promise.resolve().then(() => {
+    // would otherwise get a setState during render on this path only.
+    return Promise.resolve().then((): SpeakOutcome => {
       options.onEnd?.();
-      return false;
+      return "blocked";
     });
   }
 
-  const synth = window.speechSynthesis;
+  installUnloadGuard();
 
-  return whenVoicesReady().then(
-    (voices) =>
-      new Promise<boolean>((resolve) => {
-        if (options.interrupt !== false) synth.cancel();
+  return whenVoicesReady().then((voices) => {
+    cachedVoices = voices;
 
-        const utterance = new SpeechSynthesisUtterance(text);
-        const voice = pickVoice(voices);
-        if (voice) utterance.voice = voice;
-        utterance.rate = 1.05;
+    if (options.interrupt !== false) stopSpeaking();
 
-        let started = false;
-        let settled = false;
-        const settle = (value: boolean) => {
-          if (settled) return;
-          settled = true;
-          resolve(value);
-        };
-
-        utterance.onstart = () => {
-          started = true;
-          primed = true;
-          startKeepAlive();
-          options.onStart?.();
-          settle(true);
-        };
-        utterance.onend = () => {
-          stopKeepAlive();
-          options.onEnd?.();
-          settle(started);
-        };
-        utterance.onerror = () => {
-          stopKeepAlive();
-          options.onEnd?.();
-          settle(false);
-        };
-
-        synth.speak(utterance);
-
-        // Autoplay refusal is silent: no error, no onstart, speaking stays
-        // false. If nothing has begun shortly after queueing, report failure
-        // so the UI can surface a "tap to hear" affordance.
-        setTimeout(() => {
-          if (!started && !synth.speaking) {
-            options.onEnd?.();
-            settle(false);
-          }
-        }, 900);
-      }),
-  );
+    return new Promise<SpeakOutcome>((resolve) => {
+      queue.push({
+        chunks: chunkForSpeech(text),
+        onStart: options.onStart,
+        onEnd: options.onEnd,
+        settle: resolve,
+        started: false,
+        finished: false,
+      });
+      pump();
+    });
+  });
 }
 
+/**
+ * Cancels everything: the chunk being spoken AND the rest of its chunks AND
+ * anything queued behind it. Barge-in depends on all three.
+ */
 export function stopSpeaking(): void {
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    stopKeepAlive();
-    window.speechSynthesis.cancel();
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+  generation += 1;
+
+  const pending = active ? [active, ...queue] : [...queue];
+  queue = [];
+  active = null;
+  chunkIndex = 0;
+
+  // Settle every waiting promise so no caller hangs on a cancelled utterance.
+  // "cancelled", never "blocked": this path is always a deliberate stop.
+  for (const item of pending) {
+    if (item.finished) continue;
+    item.finished = true;
+    item.onEnd?.();
+    item.settle("cancelled");
   }
+
+  window.speechSynthesis.cancel();
 }
 
 export function isSpeaking(): boolean {
@@ -232,22 +398,31 @@ export function isSpeaking(): boolean {
   );
 }
 
-/* Chrome stops synthesising after roughly 15 seconds unless nudged. An
-   acknowledgement plus a long question can cross that, so resume() is pulsed
-   while speech is in flight. */
-let keepAlive: ReturnType<typeof setInterval> | null = null;
-
-function startKeepAlive() {
-  if (keepAlive !== null) return;
-  keepAlive = setInterval(() => {
-    if (window.speechSynthesis.speaking) window.speechSynthesis.resume();
-    else stopKeepAlive();
-  }, 10_000);
+/**
+ * Unlocks speech for this document. MUST be called synchronously inside a
+ * real user gesture handler — a click, not a promise callback after one.
+ */
+export function primeSpeech(): void {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  installUnloadGuard();
+  const warmup = new SpeechSynthesisUtterance(" ");
+  warmup.volume = 0;
+  window.speechSynthesis.speak(warmup);
+  window.speechSynthesis.resume();
+  void whenVoicesReady();
 }
 
-function stopKeepAlive() {
-  if (keepAlive !== null) {
-    clearInterval(keepAlive);
-    keepAlive = null;
-  }
+/* -------------------------------------------------------------- unload --- */
+
+let unloadGuardInstalled = false;
+
+/**
+ * The synthesiser is owned by the browser, not the page: a queue left running
+ * can outlive the document and talk over whatever comes next. Cancel on the
+ * way out.
+ */
+function installUnloadGuard() {
+  if (unloadGuardInstalled || typeof window === "undefined") return;
+  unloadGuardInstalled = true;
+  window.addEventListener("pagehide", stopSpeaking);
 }
