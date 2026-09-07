@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isSpeaking, stopSpeaking } from "./stt-tts";
+import { vlog } from "./voice-log";
 
 export type MicState =
   | "idle"
@@ -84,6 +85,13 @@ export function useMicrophone(): UseMicrophone {
     }
 
     streamRef.current = stream;
+    const track = stream.getAudioTracks()[0];
+    vlog("mic.armed", {
+      label: track?.label ?? "unknown",
+      // If echoCancellation reads false here, the synthesiser's own voice is
+      // going straight back into the analyser.
+      settings: JSON.stringify(track?.getSettings?.() ?? {}),
+    });
 
     const ctx = new AudioContext();
     audioCtxRef.current = ctx;
@@ -95,24 +103,70 @@ export function useMicrophone(): UseMicrophone {
     const buffer = new Float32Array(analyser.fftSize);
     let smoothed = 0;
 
+    // Rolling summary of what the mic hears while the synthesiser talks. If
+    // echo cancellation is failing, the peak here climbs above the barge-in
+    // threshold with nobody in the room speaking.
+    let windowStart = performance.now();
+    let windowPeak = 0;
+    let windowSum = 0;
+    let windowFrames = 0;
+    let windowWhileSpeaking = 0;
+
     const tick = () => {
       analyser.getFloatTimeDomainData(buffer);
       let sum = 0;
       for (const sample of buffer) sum += sample * sample;
       const rms = Math.sqrt(sum / buffer.length);
+      const synthTalking = isSpeaking();
 
       // Smoothed so the meter reads as a level rather than a strobe.
       smoothed = smoothed * 0.8 + rms * 0.2;
       setLevel(Math.min(1, smoothed * 6));
 
+      windowPeak = Math.max(windowPeak, rms);
+      windowSum += rms;
+      windowFrames += 1;
+      if (synthTalking) windowWhileSpeaking += 1;
+
+      const now = performance.now();
+      if (now - windowStart >= 250) {
+        vlog("mic.level", {
+          peak: windowPeak,
+          avg: windowSum / Math.max(1, windowFrames),
+          threshold: BARGE_IN_LEVEL,
+          overThreshold: windowPeak > BARGE_IN_LEVEL,
+          synthSpeakingFrames: windowWhileSpeaking,
+          frames: windowFrames,
+        });
+        windowStart = now;
+        windowPeak = 0;
+        windowSum = 0;
+        windowFrames = 0;
+        windowWhileSpeaking = 0;
+      }
+
       // Barge-in. Requiring consecutive loud frames keeps a cough or a door
       // from cutting the interviewer off mid-question.
       if (rms > BARGE_IN_LEVEL) {
         loudFramesRef.current += 1;
-        if (loudFramesRef.current >= BARGE_IN_FRAMES && isSpeaking()) {
+        if (loudFramesRef.current >= BARGE_IN_FRAMES && synthTalking) {
+          vlog("bargein.fire", {
+            rms,
+            threshold: BARGE_IN_LEVEL,
+            loudFrames: loudFramesRef.current,
+            needed: BARGE_IN_FRAMES,
+            synthSpeaking: true,
+          });
           stopSpeaking();
           setBargedIn(true);
           setTimeout(() => setBargedIn(false), 1500);
+        } else if (loudFramesRef.current === BARGE_IN_FRAMES && !synthTalking) {
+          // Loud enough to have fired, but nothing was playing. Useful as the
+          // control case: it shows the threshold being crossed by real speech.
+          vlog("bargein.armed_silent", {
+            rms,
+            loudFrames: loudFramesRef.current,
+          });
         }
       } else {
         loudFramesRef.current = 0;
@@ -138,6 +192,7 @@ export function useMicrophone(): UseMicrophone {
     recorderRef.current = recorder;
     recorder.start();
     startedAtRef.current = Date.now();
+    vlog("mic.record.start", {});
     setState("recording");
   }, []);
 
@@ -155,6 +210,7 @@ export function useMicrophone(): UseMicrophone {
     recorder.stop();
     const blob = await done;
     const durationMs = Date.now() - startedAtRef.current;
+    vlog("mic.record.stop", { durationMs, bytes: blob.size });
 
     recorderRef.current = null;
     // The stream stays open so the meter and barge-in keep working while the

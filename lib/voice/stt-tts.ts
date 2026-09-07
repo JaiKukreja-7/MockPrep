@@ -1,5 +1,6 @@
 "use client";
 
+import { callerStack, instrumentSynthesis, vlog } from "./voice-log";
 import type {
   VoiceSessionHandle,
   VoiceTransport,
@@ -272,12 +273,35 @@ function pump() {
   const myGeneration = generation;
   const isFirstChunk = chunkIndex === 0;
 
-  const utterance = new SpeechSynthesisUtterance(current.chunks[chunkIndex]);
+  const chunkText = current.chunks[chunkIndex];
+  const myIndex = chunkIndex;
+  const utterance = new SpeechSynthesisUtterance(chunkText);
   const voice = pickVoice(cachedVoices);
   if (voice) utterance.voice = voice;
   utterance.rate = 1.05;
 
+  // Tracks how far through the chunk the synthesiser actually got, which is
+  // what distinguishes "finished" from "cut off".
+  let queuedAt = performance.now();
+  let lastBoundaryChar = 0;
+  let startedAt = 0;
+
+  vlog("chunk.queue", {
+    i: myIndex,
+    of: current.chunks.length,
+    chars: chunkText.length,
+    gen: myGeneration,
+    text: chunkText,
+  });
+
   utterance.onstart = () => {
+    startedAt = performance.now();
+    vlog("chunk.start", {
+      i: myIndex,
+      gen: myGeneration,
+      stale: myGeneration !== generation,
+      waitMs: Math.round(startedAt - queuedAt),
+    });
     if (myGeneration !== generation) return;
     if (!current.started) {
       current.started = true;
@@ -285,19 +309,52 @@ function pump() {
     }
   };
 
+  utterance.onboundary = (event) => {
+    lastBoundaryChar = event.charIndex;
+    vlog("chunk.boundary", {
+      i: myIndex,
+      charIndex: event.charIndex,
+      ofChars: chunkText.length,
+      name: event.name,
+      msIn: startedAt ? Math.round(performance.now() - startedAt) : 0,
+    });
+  };
+
   utterance.onend = () => {
+    const spokenMs = startedAt ? Math.round(performance.now() - startedAt) : 0;
+    // Reaching the final word should leave lastBoundaryChar near the end. A
+    // low value here means the utterance was stopped, not completed.
+    vlog("chunk.end", {
+      i: myIndex,
+      gen: myGeneration,
+      stale: myGeneration !== generation,
+      spokenMs,
+      reachedChar: lastBoundaryChar,
+      ofChars: chunkText.length,
+      completed: lastBoundaryChar >= chunkText.length - 12,
+      synthSpeaking: synth.speaking,
+    });
     // Stale means cancelled. Do NOT advance the queue.
     if (myGeneration !== generation) return;
     chunkIndex += 1;
     pump();
   };
 
-  utterance.onerror = () => {
+  utterance.onerror = (event) => {
+    vlog("chunk.error", {
+      i: myIndex,
+      gen: myGeneration,
+      stale: myGeneration !== generation,
+      error: (event as SpeechSynthesisErrorEvent).error,
+      reachedChar: lastBoundaryChar,
+      ofChars: chunkText.length,
+    });
     if (myGeneration !== generation) return;
     finishActive(current.started ? "cancelled" : "blocked");
     pump();
   };
 
+  queuedAt = performance.now();
   synth.speak(utterance);
 
   if (isFirstChunk) {
@@ -346,6 +403,13 @@ export function speak(
   }
 
   installUnloadGuard();
+  const chunkPlan = chunkForSpeech(text);
+  vlog("speak.call", {
+    chars: text.length,
+    chunks: chunkPlan.length,
+    interrupt: options.interrupt !== false,
+    preview: text,
+  });
 
   return whenVoicesReady().then((voices) => {
     cachedVoices = voices;
@@ -372,6 +436,17 @@ export function speak(
  */
 export function stopSpeaking(): void {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+  // The stack is the point: it names whichever code path silenced the
+  // interviewer — barge-in, an unmount, a new utterance, or teardown.
+  vlog("cancel", {
+    activeChunk: active ? chunkIndex : null,
+    activeChunks: active ? active.chunks.length : 0,
+    queued: queue.length,
+    wasSpeaking: window.speechSynthesis.speaking,
+    gen: generation,
+    by: callerStack(),
+  });
 
   generation += 1;
 
@@ -424,5 +499,6 @@ let unloadGuardInstalled = false;
 function installUnloadGuard() {
   if (unloadGuardInstalled || typeof window === "undefined") return;
   unloadGuardInstalled = true;
+  instrumentSynthesis();
   window.addEventListener("pagehide", stopSpeaking);
 }

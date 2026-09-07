@@ -10,6 +10,7 @@ import {
   stopSpeaking,
 } from "@/lib/voice/stt-tts";
 import { useMicrophone } from "@/lib/voice/use-microphone";
+import { vlog } from "@/lib/voice/voice-log";
 import type { VoiceSessionHandle } from "@/lib/voice/transport";
 import type { RoundView } from "@/lib/data/session";
 
@@ -69,7 +70,11 @@ export function VoiceRound({
    */
   const readQuestion = useCallback(
     async (question: string, questionId: string) => {
-      if (spokenForRef.current === questionId) return;
+      if (spokenForRef.current === questionId) {
+        vlog("question.skip", { reason: "already spoken", questionId });
+        return;
+      }
+      vlog("question.read", { questionId, chars: question.length });
       spokenForRef.current = questionId;
 
       const outcome = await speak(question, {
@@ -77,6 +82,8 @@ export function VoiceRound({
         onStart: () => setSpeaking(true),
         onEnd: () => setSpeaking(false),
       });
+
+      vlog("question.outcome", { questionId, outcome });
 
       // Only a silent refusal earns the prompt. "cancelled" means barge-in or
       // teardown stopped it deliberately, and audio plainly works.
@@ -105,8 +112,18 @@ export function VoiceRound({
   }, [current.id, current.question, readQuestion]);
 
   /* Round teardown: leaving the session kills the whole queue, so speech
-     never carries into the next round or the report. */
-  useEffect(() => () => stopSpeaking(), []);
+     never carries into the next round or the report.
+
+     Instrumented because an unmount here is indistinguishable, by ear, from
+     barge-in: both stop the interviewer mid-word. If VoiceRound remounts
+     across a router.refresh(), this fires and the cancel stack will say so. */
+  useEffect(() => {
+    vlog("voiceround.mount", {});
+    return () => {
+      vlog("voiceround.unmount", {});
+      stopSpeaking();
+    };
+  }, []);
 
   /** One gesture: unlocks audio, arms the mic, reads the question. */
   const enableSound = useCallback(async () => {
@@ -122,12 +139,14 @@ export function VoiceRound({
     primeSpeech();
     const ok = await mic.arm();
     if (!ok) return;
+    vlog("record.begin", { note: "cancels any playing question" });
     stopSpeaking();
     setSpeaking(false);
     mic.startRecording();
   }, [mic]);
 
   const send = useCallback(async () => {
+    vlog("turn.send", { roundId: current.id });
     const captured = await mic.stopRecording();
     if (!captured) {
       setError("Nothing was recorded.");
@@ -144,6 +163,12 @@ export function VoiceRound({
         // it is the offset on its own — adding time-since-mount here would
         // count the same seconds twice.
         offsetMs: Math.max(0, elapsedSeconds * 1000),
+      });
+
+      vlog("turn.result", {
+        done: result.done,
+        ackChars: result.acknowledgement?.length ?? 0,
+        nextQuestionChars: result.nextQuestion?.length ?? 0,
       });
 
       setRemaining(result.remainingSeconds);
@@ -163,6 +188,7 @@ export function VoiceRound({
 
       // The next question is read by the effect once the refresh swaps
       // `current`, so the spoken text always matches the heading.
+      vlog("turn.refresh", {});
       onTurnComplete();
     } catch (e) {
       setError(e instanceof Error ? e.message : "That turn did not go through.");
