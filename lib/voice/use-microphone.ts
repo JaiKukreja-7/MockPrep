@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isSpeaking, stopSpeaking } from "./stt-tts";
+import { isSpeaking, msSinceSpeechStart, stopSpeaking } from "./stt-tts";
 import { vlog } from "./voice-log";
 
 export type MicState =
@@ -11,10 +11,57 @@ export type MicState =
   | "recording"
   | "denied";
 
-/** Above this RMS the candidate is considered to be talking, not room noise. */
-const BARGE_IN_LEVEL = 0.06;
-/** Sustained frames over the threshold before we call it speech. */
-const BARGE_IN_FRAMES = 3;
+/* ===========================================================================
+   BARGE-IN DETECTION
+   ---------------------------------------------------------------------------
+   The previous version used a fixed 0.06 RMS threshold and three consecutive
+   frames. Both were wrong, and a captured trace showed why: a real room's
+   idle floor peaked 0.06–0.19, so the threshold sat *below* ambient noise,
+   and three frames at 60fps is ~50ms — short enough that the synthesiser's
+   own onset, leaking past echo cancellation, tripped it. Questions died
+   within 400ms of starting, with nobody in the room speaking.
+
+   So: nothing here is a guessed constant against an absolute level. The
+   threshold is derived from the room, and again from the echo, and a
+   decision needs sustained evidence rather than a handful of frames.
+   =========================================================================== */
+
+/** Idle floor is measured over this long after arming, before anything speaks. */
+const CALIBRATION_MS = 2000;
+/**
+ * Speech has to clear the room's own p95 by this much.
+ *
+ * Deliberately not higher: modelled against the captured trace, a 2.2x idle
+ * multiplier with a noisy room (p95 0.19) put the speaking bar at 0.63 RMS,
+ * which is above ordinary talking — barge-in would have gone from twitchy to
+ * deaf. At 1.8 the bar still sits 2.6-4.9x above the observed false fires.
+ */
+const IDLE_MULTIPLIER = 1.8;
+/** A floor so low it must be a near-silent room; guards against over-eager firing. */
+const MIN_THRESHOLD = 0.08;
+/** While the interviewer talks, the bar rises: interrupting is a deliberate act. */
+const SPEAKING_BOOST = 1.35;
+/** …and it must also clear the measured echo, not just the idle floor. */
+const ECHO_MULTIPLIER = 1.8;
+/**
+ * No barge-in in the first moments of a chunk. The onset is the loudest part
+ * of the echo, and two of three false fires in the captured trace landed
+ * inside 400ms of a chunk starting.
+ */
+const GUARD_MS = 700;
+/** Decision window. Sustained speech, not a spike. */
+const WINDOW_MS = 600;
+/** Share of the window that must be over threshold. */
+const WINDOW_RATIO = 0.6;
+/** Never decide on a handful of samples. */
+const MIN_WINDOW_FRAMES = 15;
+
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+  return sorted[index];
+}
 
 export interface UseMicrophone {
   state: MicState;
@@ -46,7 +93,6 @@ export function useMicrophone(): UseMicrophone {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
-  const loudFramesRef = useRef(0);
 
   const teardown = useCallback(() => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -71,8 +117,9 @@ export function useMicrophone(): UseMicrophone {
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          // Without echo cancellation the synthesiser's own voice comes back
-          // through the mic and trips barge-in against itself.
+          // Echo cancellation is necessary but demonstrably not sufficient:
+          // the captured trace had it on and still leaked enough of the
+          // synthesiser to cross a fixed threshold.
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
@@ -88,8 +135,6 @@ export function useMicrophone(): UseMicrophone {
     const track = stream.getAudioTracks()[0];
     vlog("mic.armed", {
       label: track?.label ?? "unknown",
-      // If echoCancellation reads false here, the synthesiser's own voice is
-      // going straight back into the analyser.
       settings: JSON.stringify(track?.getSettings?.() ?? {}),
     });
 
@@ -103,14 +148,26 @@ export function useMicrophone(): UseMicrophone {
     const buffer = new Float32Array(analyser.fftSize);
     let smoothed = 0;
 
-    // Rolling summary of what the mic hears while the synthesiser talks. If
-    // echo cancellation is failing, the peak here climbs above the barge-in
-    // threshold with nobody in the room speaking.
-    let windowStart = performance.now();
-    let windowPeak = 0;
-    let windowSum = 0;
-    let windowFrames = 0;
-    let windowWhileSpeaking = 0;
+    /* ---- calibration state ---- */
+    const armedAt = performance.now();
+    const idleSamples: number[] = [];
+    let idleThreshold = MIN_THRESHOLD;
+    let calibrated = false;
+
+    /* ---- echo state: what the mic hears of our own voice ---- */
+    const echoSamples: number[] = [];
+
+    /* ---- rolling decision window ---- */
+    let windowFrames: Array<{ t: number; over: boolean }> = [];
+    let lastSuppressLog = 0;
+    let lastSpeechLog = 0;
+
+    /* ---- level reporting ---- */
+    let reportStart = performance.now();
+    let reportPeak = 0;
+    let reportSum = 0;
+    let reportCount = 0;
+    let reportSpeakingFrames = 0;
 
     const tick = () => {
       analyser.getFloatTimeDomainData(buffer);
@@ -118,58 +175,126 @@ export function useMicrophone(): UseMicrophone {
       for (const sample of buffer) sum += sample * sample;
       const rms = Math.sqrt(sum / buffer.length);
       const synthTalking = isSpeaking();
+      const now = performance.now();
 
-      // Smoothed so the meter reads as a level rather than a strobe.
       smoothed = smoothed * 0.8 + rms * 0.2;
       setLevel(Math.min(1, smoothed * 6));
 
-      windowPeak = Math.max(windowPeak, rms);
-      windowSum += rms;
-      windowFrames += 1;
-      if (synthTalking) windowWhileSpeaking += 1;
-
-      const now = performance.now();
-      if (now - windowStart >= 250) {
-        vlog("mic.level", {
-          peak: windowPeak,
-          avg: windowSum / Math.max(1, windowFrames),
-          threshold: BARGE_IN_LEVEL,
-          overThreshold: windowPeak > BARGE_IN_LEVEL,
-          synthSpeakingFrames: windowWhileSpeaking,
-          frames: windowFrames,
-        });
-        windowStart = now;
-        windowPeak = 0;
-        windowSum = 0;
-        windowFrames = 0;
-        windowWhileSpeaking = 0;
+      /* ---------------------------------------------------- calibration */
+      if (!calibrated) {
+        // Only quiet frames count: a question playing during calibration
+        // would bake the echo into the "room" floor.
+        if (!synthTalking) idleSamples.push(rms);
+        if (now - armedAt >= CALIBRATION_MS) {
+          const floor = percentile(idleSamples, 0.95);
+          idleThreshold = Math.max(MIN_THRESHOLD, floor * IDLE_MULTIPLIER);
+          calibrated = true;
+          vlog("mic.calibrated", {
+            samples: idleSamples.length,
+            floorP50: percentile(idleSamples, 0.5),
+            floorP95: floor,
+            idleThreshold,
+            speakingThresholdBase: idleThreshold * SPEAKING_BOOST,
+          });
+        }
       }
 
-      // Barge-in. Requiring consecutive loud frames keeps a cough or a door
-      // from cutting the interviewer off mid-question.
-      if (rms > BARGE_IN_LEVEL) {
-        loudFramesRef.current += 1;
-        if (loudFramesRef.current >= BARGE_IN_FRAMES && synthTalking) {
+      /* ------------------------------------------------------ echo floor
+         Sampled only inside the guard window, where we know any level is
+         our own output rather than an interruption. */
+      const sinceChunkStart = msSinceSpeechStart();
+      const inGuard = synthTalking && sinceChunkStart < GUARD_MS;
+      if (inGuard) {
+        echoSamples.push(rms);
+        if (echoSamples.length > 400) echoSamples.shift();
+      }
+      const echoFloor =
+        echoSamples.length >= 15 ? percentile(echoSamples, 0.95) : 0;
+
+      const threshold = synthTalking
+        ? Math.max(idleThreshold * SPEAKING_BOOST, echoFloor * ECHO_MULTIPLIER)
+        : idleThreshold;
+
+      /* -------------------------------------------------- rolling window */
+      windowFrames.push({ t: now, over: rms > threshold });
+      while (windowFrames.length > 0 && now - windowFrames[0].t > WINDOW_MS) {
+        windowFrames.shift();
+      }
+      const overCount = windowFrames.reduce((n, f) => n + (f.over ? 1 : 0), 0);
+      const ratio =
+        windowFrames.length > 0 ? overCount / windowFrames.length : 0;
+      const sustained =
+        windowFrames.length >= MIN_WINDOW_FRAMES && ratio >= WINDOW_RATIO;
+
+      /* -------------------------------------------------------- reporting */
+      reportPeak = Math.max(reportPeak, rms);
+      reportSum += rms;
+      reportCount += 1;
+      if (synthTalking) reportSpeakingFrames += 1;
+      if (now - reportStart >= 250) {
+        vlog("mic.level", {
+          peak: reportPeak,
+          avg: reportSum / Math.max(1, reportCount),
+          threshold,
+          echoFloor,
+          overThreshold: reportPeak > threshold,
+          ratio,
+          synthSpeakingFrames: reportSpeakingFrames,
+          frames: reportCount,
+        });
+        reportStart = now;
+        reportPeak = 0;
+        reportSum = 0;
+        reportCount = 0;
+        reportSpeakingFrames = 0;
+      }
+
+      /* ---------------------------------------------------------- decide
+         Sustained speech while nothing is playing is logged as the control
+         case: it is the evidence that the bar is reachable by a real voice.
+         If a trace shows questions no longer cut off but never shows
+         speech.detected either, the threshold has gone from twitchy to deaf
+         and IDLE_MULTIPLIER wants lowering. */
+      if (!synthTalking && sustained && calibrated && now - lastSpeechLog > 1000) {
+        lastSpeechLog = now;
+        vlog("speech.detected", {
+          rms,
+          threshold,
+          ratio,
+          note: "would have barged in if the interviewer were talking",
+        });
+      }
+
+      if (synthTalking && sustained && calibrated) {
+        if (inGuard) {
+          // Sustained, but too soon after onset to trust. Log sparsely.
+          if (now - lastSuppressLog > 500) {
+            lastSuppressLog = now;
+            vlog("bargein.suppressed", {
+              reason: "guard window",
+              msSinceChunkStart: Math.round(sinceChunkStart),
+              guardMs: GUARD_MS,
+              rms,
+              threshold,
+              ratio,
+            });
+          }
+        } else {
           vlog("bargein.fire", {
             rms,
-            threshold: BARGE_IN_LEVEL,
-            loudFrames: loudFramesRef.current,
-            needed: BARGE_IN_FRAMES,
-            synthSpeaking: true,
+            threshold,
+            echoFloor,
+            idleThreshold,
+            ratio,
+            windowFrames: windowFrames.length,
+            msSinceChunkStart: Math.round(sinceChunkStart),
           });
           stopSpeaking();
           setBargedIn(true);
           setTimeout(() => setBargedIn(false), 1500);
-        } else if (loudFramesRef.current === BARGE_IN_FRAMES && !synthTalking) {
-          // Loud enough to have fired, but nothing was playing. Useful as the
-          // control case: it shows the threshold being crossed by real speech.
-          vlog("bargein.armed_silent", {
-            rms,
-            loudFrames: loudFramesRef.current,
-          });
+          // Clear the window so one burst cannot fire twice.
+          windowFrames = [];
         }
-      } else {
-        loudFramesRef.current = 0;
       }
 
       rafRef.current = requestAnimationFrame(tick);

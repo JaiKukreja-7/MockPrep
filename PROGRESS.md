@@ -273,6 +273,39 @@ Also found: **barge-in could never have worked** — the analyser lived inside
 interviewer spoke, which is the only time barge-in matters. `useMicrophone` now
 separates `arm()` from `startRecording()`.
 
+### Barge-in fired against the synthesiser's own voice (2026-09-06)
+
+Chunking did **not** fix the cut-offs, and short utterances still truncated —
+so the 15s cutoff was the wrong diagnosis. Instrumenting rather than guessing
+again produced a captured trace: three `bargein.fire` events with
+`synthSpeaking=true` while the room was silent, at RMS 0.071 / 0.070 / 0.094
+against a threshold of 0.06, each followed within 20ms by
+`chunk.error interrupted`.
+
+Root cause was the threshold itself. **A real room's idle floor peaks
+0.06–0.19**, so a fixed 0.06 sat *below* ambient noise. Three consecutive
+frames at 60fps is ~50ms, short enough for the synthesiser's own onset to trip
+it past echo cancellation. Two of three false fires landed within 400ms of a
+chunk starting.
+
+Rebuilt with nothing keyed to an absolute level:
+
+- **Idle floor measured** over the 2s after `arm()`, from non-speaking frames
+  only. Threshold is `p95 × 1.8`, floored at 0.08.
+- **Echo floor measured** during each chunk's guard window, where any level is
+  known to be our own output. The speaking threshold must clear that too.
+- **Guard window**: no barge-in in the first 700ms of a chunk.
+- **Rolling window**: 60% of a 600ms window over threshold, minimum 15 frames
+  — not three consecutive.
+- Barge-in cannot fire before calibration completes.
+
+The multipliers were modelled against the captured numbers rather than picked:
+2.2×/1.5× put the speaking bar at 0.63 RMS in a noisy room, above ordinary
+talking, which would have swapped twitchy for deaf. 1.8×/1.35× keeps it
+2.6–4.9× above the observed false fires. A `speech.detected` log line records
+sustained speech while nothing is playing, so a trace can show whether the bar
+is reachable by a real voice — **awaiting a confirming trace.**
+
 And a consistency bug: the brain was composing its own copy of the next
 question, putting three different strings on screen (model paraphrase in the
 caption, verbatim question in the heading, previous question in the transcript).

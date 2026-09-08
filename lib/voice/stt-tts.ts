@@ -296,6 +296,7 @@ function pump() {
 
   utterance.onstart = () => {
     startedAt = performance.now();
+    lastChunkStartedAt = startedAt;
     vlog("chunk.start", {
       i: myIndex,
       gen: myGeneration,
@@ -465,6 +466,22 @@ export function stopSpeaking(): void {
   }
 
   window.speechSynthesis.cancel();
+}
+
+/**
+ * When the current chunk began speaking.
+ *
+ * Barge-in uses this for a guard window: the moment a chunk starts is exactly
+ * when the mic is hit hardest by the synthesiser's own onset, and firing there
+ * kills the chunk in its first syllable.
+ */
+let lastChunkStartedAt = 0;
+
+/** Milliseconds since the current chunk started, or Infinity if none has. */
+export function msSinceSpeechStart(): number {
+  return lastChunkStartedAt === 0
+    ? Number.POSITIVE_INFINITY
+    : performance.now() - lastChunkStartedAt;
 }
 
 export function isSpeaking(): boolean {
