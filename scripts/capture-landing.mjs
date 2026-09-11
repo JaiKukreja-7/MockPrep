@@ -9,6 +9,13 @@
 // through the script — the window is yours, the script only drives it after
 // you are in. Starting the voice round costs one question-generation call
 // and leaves a live round that the stale sweep abandons after an hour.
+//
+// Before each capture the dev-tools badge is removed and the account line in
+// the sidebar is blanked, so neither the Next.js overlay nor an email address
+// ends up on the landing page. The voice round is captured mid-question: the
+// script grants the microphone up front, clicks the audio unlock with a
+// trusted (CDP) click — a synthetic click would not count as activation and
+// speech would stay blocked — and waits for the speaker to report speaking.
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +66,8 @@ await new Promise((r) => (ws.onopen = r));
 ws.onmessage = (m) => {
   const msg = JSON.parse(m.data);
   if (msg.id && pending.has(msg.id)) {
-    pending.get(msg.id)(msg.result);
+    if (msg.error) console.warn("  CDP:", msg.error.message);
+    pending.get(msg.id)(msg.result ?? {});
     pending.delete(msg.id);
   }
 };
@@ -88,12 +96,20 @@ const goto = async (path) => {
   await sleep(500);
 };
 const capture = async (name) => {
+  await evaluate(`(() => {
+    document.querySelector("nextjs-portal")?.remove();
+    for (const p of document.querySelectorAll("aside p.truncate")) p.textContent = "";
+  })()`);
+  await sleep(150);
   const { data } = await send("Page.captureScreenshot", { format: "png" });
   writeFileSync(join(OUT, `${name}.png`), Buffer.from(data, "base64"));
   console.log(`  ${name}.png ← ${await pathname()}`);
 };
 
 await send("Page.enable");
+// Mic permission ahead of time: the unlock button also arms the microphone,
+// and a permission prompt would hold the question until someone answered it.
+await send("Browser.grantPermissions", { origin: BASE, permissions: ["audioCapture"] });
 await send("Emulation.setDeviceMetricsOverride", {
   width: WIDTH,
   height: HEIGHT,
@@ -129,8 +145,29 @@ await evaluate(`(() => {
   form.querySelector('button[type="submit"]').click();
 })()`);
 await waitFor(async () => (await pathname()).startsWith("/session/"), 90_000, "the voice round to start");
-await sleep(3000);
+await sleep(2500);
 await evaluate("document.fonts.ready");
+
+// If Chrome refused autoplay, the page shows the unlock; click it as a real
+// input event so the document gains user activation.
+const unlock = await evaluate(`(() => {
+  const b = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Let the interviewer speak");
+  if (!b) return null;
+  const r = b.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+})()`);
+if (unlock) {
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await send("Input.dispatchMouseEvent", { type, x: unlock.x, y: unlock.y, button: "left", clickCount: 1 });
+  }
+}
+const speaking = await waitFor(
+  () => evaluate(`!!document.querySelector('svg[aria-label="Interviewer speaking"]')`),
+  15_000,
+  "the interviewer to start speaking",
+).catch(() => false);
+if (!speaking) console.log("  (the interviewer never started speaking — capturing the idle state)");
+await sleep(1500);
 await capture("session");
 
 console.log("Done. Files are in public/landing/.");
