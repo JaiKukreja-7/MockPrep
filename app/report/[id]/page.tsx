@@ -127,6 +127,7 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                 key={line.id}
                 className="py-8"
                 scale="ui"
+                stackTrailing
                 title={line.body}
                 meta={
                   <>
@@ -140,7 +141,7 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                 // wrap at the full column width and flagged ones wrap 176px
                 // short, so the transcript's right edge ratchets down the page.
                 trailing={
-                  <span className="flex w-44 justify-end">
+                  <span className="flex w-full justify-end sm:w-44">
                     {line.flag ? (
                       <PillTag>{FLAG_LABELS[line.flag] ?? line.flag}</PillTag>
                     ) : null}

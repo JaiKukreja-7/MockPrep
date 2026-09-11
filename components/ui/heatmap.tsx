@@ -29,24 +29,34 @@ export interface HeatmapProps {
  * borders and no radius, like every other flat block in the system.
  */
 export function Heatmap({ cells, months, columns }: HeatmapProps) {
+  // Fifty-three columns in a phone's 311px leaves a 3.9px cell, which is
+  // texture rather than data. Hold cells at six pixels minimum and let the
+  // block scroll inside its own container — wide content scrolls in place,
+  // never the page. At 768 and up it fits without scrolling.
+  const minWidth = `${columns * 6 + (columns - 1) * 2}px`;
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 overflow-x-auto">
       <div
         aria-hidden
         className="grid text-u-micro"
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, minWidth }}
       >
         {months.map((month) => (
           <span
             key={`${month.label}-${month.column}`}
-            style={{ gridColumn: `${month.column + 1} / span 4` }}
+            // Clamped: a four-column span from column 51 would create
+            // implicit columns past the grid and push the page wider.
+            style={{
+              gridColumn: `${month.column + 1} / ${Math.min(month.column + 5, columns + 1)}`,
+            }}
           >
             {month.label}
           </span>
         ))}
       </div>
 
-      <div className="border-y border-y-rule py-2">
+      <div className="border-y border-y-rule py-2" style={{ minWidth }}>
         <div
           className="grid grid-flow-col gap-[2px]"
           style={{

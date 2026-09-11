@@ -28,7 +28,7 @@ export default async function QuestionsPage({
       <main className="flex flex-1 flex-col gap-8 px-8 py-12">
         {data.tracks.length > 0 ? (
           <nav aria-label="Filter by track" className="flex flex-wrap items-center gap-4">
-            <Link href="/questions" aria-current={!track ? "true" : undefined}>
+            <Link href="/questions" className="inline-flex py-1" aria-current={!track ? "true" : undefined}>
               <PillTag className={!track ? "bg-ink text-ink-inverse" : undefined}>
                 All
               </PillTag>
@@ -37,6 +37,7 @@ export default async function QuestionsPage({
               <Link
                 key={t}
                 href={`/questions?track=${t}`}
+                className="inline-flex py-1"
                 aria-current={track === t ? "true" : undefined}
               >
                 <PillTag

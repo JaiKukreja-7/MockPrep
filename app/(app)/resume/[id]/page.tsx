@@ -116,6 +116,7 @@ export default async function AnalysisPage({
                   key={`${finding.category}-${i}`}
                   className="py-8"
                   scale="ui"
+                  stackTrailing
                   title={finding.title}
                   meta={
                     <>
@@ -131,7 +132,7 @@ export default async function AnalysisPage({
                   // Reserved on every row, flagged or not, so the detail text
                   // wraps at one consistent width down the page.
                   trailing={
-                    <span className="flex w-44 justify-end">
+                    <span className="flex w-full justify-end sm:w-44">
                       <PillTag>{CATEGORY_LABELS[finding.category]}</PillTag>
                     </span>
                   }

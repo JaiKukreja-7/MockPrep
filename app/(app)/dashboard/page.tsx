@@ -80,7 +80,7 @@ export default async function DashboardPage() {
               <p className="mt-10">
                 <a
                   href={`/report/${recentSessions[0]?.id ?? ""}`}
-                  className="group inline-flex flex-col text-u-body"
+                  className="group inline-flex flex-col py-2 text-u-body"
                 >
                   <span>Read the full report</span>
                   <span className="link-bar mt-1 w-0 transition-[width] duration-150 group-hover:w-full" />
@@ -125,6 +125,7 @@ export default async function DashboardPage() {
                     key={session.id}
                     className="py-10"
                     scale="ui"
+                    stackTrailing
                     title={session.title}
                     meta={
                       session.date || session.length ? (
@@ -140,9 +141,12 @@ export default async function DashboardPage() {
                         </>
                       ) : null
                     }
+                    // Full width below sm, so it wraps under the title
+                    // instead of crushing it; the fixed pill column returns
+                    // once there is room for it beside the text.
                     trailing={
-                      <span className="flex items-center gap-8">
-                        <span className="flex w-44 justify-center">
+                      <span className="flex items-center justify-between gap-8 sm:justify-start">
+                        <span className="flex sm:w-44 sm:justify-center">
                           <PillTag>{session.track}</PillTag>
                         </span>
                         <span className="numeric w-12 text-right text-u-lg">

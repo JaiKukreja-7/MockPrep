@@ -246,6 +246,64 @@ it loads cleanly with Groq as the only leg.
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
 
+### Stale live rounds are swept (2026-09-11)
+
+A live session left open resumed with its true wall-clock elapsed — 6425:39.
+`lib/rounds/sweep.ts` marks a live round **abandoned after one hour with no
+activity**, measured from the latest of `started_at` and the newest
+transcript line, so someone thinking on question two is not swept. One hour
+because a round is three questions capped at ten minutes of speech: an hour
+of nothing is a closed laptop, not a pause.
+
+It runs at read time — on the session page (before load) and the sessions
+list — because reading is the only moment a stale round is a problem. The
+session page renders an abandoned state with a way out instead of the live
+UI. A scheduled sweep (pg_cron) would tidy rounds nobody returns to; it needs
+setting up on the Supabase side.
+
+*Verified*: the 6425:39 session now lands on the abandoned state.
+
+### Mobile (step 10, 2026-09-11)
+
+Every screen audited at **375 and 768** by measurement, not by eye: page
+overflow (`scrollWidth − clientWidth`), every tap target under 40px, and for
+the session screen the question's height as a share of the viewport.
+
+**Fixed:**
+- `.row` now wraps (`flex-wrap`, row-gap tighter than column-gap) and
+  `RuledRow` gained `stackTrailing`: a wide trailing slot drops beneath the
+  title on a phone instead of crushing it. Before: recent-sessions title
+  **78px**, trailing 23px past the viewport. After: title 311px, trailing
+  wrapped beneath. Used on dashboard, reports, resume, report transcript,
+  analysis findings. Meter rows keep a lone number beside the label.
+- Heatmap: 53 columns in 311px gave 3.9px cells. Cells are held at 6px
+  minimum and the block scrolls inside its own container — wide content
+  scrolls in place, never the page. A month label spanning four columns
+  from column 51 was creating implicit columns and pushing the page 24px
+  wide; the span is clamped.
+- Nav links on the strip get `py-3` (22px → 46px tap target), `lg:py-0`
+  hands the rhythm back to the column. Filter pills and row-title links get
+  invisible vertical padding to clear 40px.
+
+**Mobile Safari hardening (unverified on device — no iOS here):**
+- `AudioContext` is created synchronously at the top of `arm()`, before the
+  `getUserMedia` await, while the click still counts as activation. Created
+  after an await it starts suspended on iOS: the analyser reads zeros, the
+  meter dies, the noise floor calibrates at silence and barge-in goes deaf.
+  `resume()` is called and the state logged as `audioContextState`.
+- `MediaRecorder` asks for WebM/Opus, then WebM, then MP4 — iOS has no WebM.
+  The upload is named from the blob's real MIME type and the server carries
+  that name through to Whisper, which keys its decoder off the extension.
+- Known and not fixed: iOS Safari does not reliably fire `onboundary`, so the
+  Speaker's rings will not appear there. The breathing still runs; the state
+  still reads. Faking word events from a timer was considered and rejected —
+  the rings mean words.
+
+*Verified at both widths*: sign-in, dashboard, sessions (table scrolls in its
+container), reports, questions, settings, resume, resume/[id], report/[id],
+landing, session text, session voice. Zero page overflow on every screen at
+768 and on every screen at 375 **except the session screen — see Blocked**.
+
 ### Visual speaker (step 9, 2026-09-11)
 
 The interviewer, seen. Direction B of three proposed — the accent dot that
@@ -421,7 +479,48 @@ once while nothing is playing, and check for `speech.detected` in
 The Browser pane used for automated checks blocks `getUserMedia` and has no
 audio out, so this can only be closed from a real browser.
 
-### 3. One escalated row left in the database
+### 3. `--u-display` at 375 — a genuine gap in the type scale (DECISION)
+
+The session question is set at `--u-display` (4rem = 64px) with the display
+treatment. At 375 it does not work, on two counts, both measured:
+
+| | voice round | text round |
+|---|---|---|
+| question | 106 chars | 117 chars |
+| height | 598px, **74% of viewport**, 11 lines | 707px, **87%**, 13 lines |
+| below the fold | Speaker, record control, level meter | textarea at y=930 |
+
+And width: the `h1` is 311px wide but its content is **352px** — the single
+word "MARKETPLACE?" at 64px condensed does not fit the column, and that alone
+pushes the whole page 10px wide. At 768 the same questions run 272px (27%)
+with no overflow; the failure is phone-specific.
+
+The cause is structural. `--u-display` is a fixed 4rem. The display scale's
+own fluid step, `--d-hero`, is `clamp(4rem, 13.6vw, 12.2rem)` — it also
+bottoms out at 4rem. So below ~530px there is **no display size smaller than
+64px in either scale**; the next step down is `--d-mid` (38px, documented as
+project row titles only) or `--u-lg` (20px). The UI scale was built for the
+dashboard at desktop and never had a phone step.
+
+Two ways through, neither taken silently:
+
+**A. Make `--u-display` fluid** — `clamp(2.5rem, 11vw, 4rem)`: 41px at 375,
+64px from ~580px up. Keeps the name, keeps the cliff above `--u-lg`, keeps
+"one big number per screen" — the number just gets smaller on a phone, on
+every screen (scores go 64 → 41 at 375). At 41px the 117-char question is
+~7 lines, ~30% of the viewport, and "MARKETPLACE?" is ~225px, inside the
+column. One token value changes; nothing else does. *Recommended.*
+
+**B. Step only the question down** — `text-d-mid sm:text-u-display` on the
+session `h1`. No token changes, scores untouched, but `--d-mid` is used
+outside its documented role and the question stops being "the one big
+number".
+
+The question bank has a milder version of the same thing — `--d-mid` titles
+for sentence-length questions run 333px at 375 — but it is a list, scrolling
+is expected, and nothing important sits beneath. Not blocking.
+
+### 4. One escalated row left in the database
 
 The guest row used to prove the escalation still has `is_guest: false,
 daily_request_cap: 9999`. Throwaway anonymous user, hole now closed, but it can

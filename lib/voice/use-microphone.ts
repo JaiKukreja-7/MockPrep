@@ -56,6 +56,9 @@ const WINDOW_RATIO = 0.6;
 /** Never decide on a handful of samples. */
 const MIN_WINDOW_FRAMES = 15;
 
+/** In order of preference. Whisper accepts all three. */
+const RECORDER_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -113,6 +116,14 @@ export function useMicrophone(): UseMicrophone {
     setError(null);
     setState("requesting");
 
+    // iOS Safari: an AudioContext created after an await has lost the user
+    // gesture and starts suspended — the analyser then reads zeros forever,
+    // which kills the level meter, calibrates the noise floor at silence,
+    // and leaves barge-in deaf. Create it synchronously, first thing, while
+    // the click that called arm() still counts as activation.
+    const ctx = new AudioContext();
+    audioCtxRef.current = ctx;
+
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -126,20 +137,25 @@ export function useMicrophone(): UseMicrophone {
         },
       });
     } catch {
+      ctx.close().catch(() => {});
+      audioCtxRef.current = null;
       setState("denied");
       setError("Microphone access was blocked. Allow it, or switch to text mode.");
       return false;
     }
 
+    // Belt and braces for the same iOS rule: resume() is a no-op elsewhere
+    // and the state is logged so a silent meter can be traced to this line.
+    if (ctx.state !== "running") await ctx.resume().catch(() => {});
+
     streamRef.current = stream;
     const track = stream.getAudioTracks()[0];
     vlog("mic.armed", {
       label: track?.label ?? "unknown",
+      audioContextState: ctx.state,
       settings: JSON.stringify(track?.getSettings?.() ?? {}),
     });
 
-    const ctx = new AudioContext();
-    audioCtxRef.current = ctx;
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
@@ -310,7 +326,14 @@ export function useMicrophone(): UseMicrophone {
     if (!stream) return;
 
     chunksRef.current = [];
-    const recorder = new MediaRecorder(stream);
+    // Chrome records WebM/Opus; iOS Safari has no WebM and records MP4/AAC.
+    // Ask for the first the browser supports rather than assuming, and let
+    // the transport name the file from what actually came back.
+    const mimeType = RECORDER_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+    const recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream);
+    vlog("mic.recorder", { mimeType: recorder.mimeType || "(default)" });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };

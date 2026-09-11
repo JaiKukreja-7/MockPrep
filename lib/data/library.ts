@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { sweepStaleSessions } from "@/lib/rounds/sweep";
 import type { SessionStatus, Track } from "@/lib/supabase/types";
 
 /* --------------------------------------------------------------------------
@@ -62,6 +63,9 @@ export async function getSessions(track?: Track): Promise<SessionList | null> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
+
+  // Stale live rounds stop reading as "live" the moment someone looks.
+  await sweepStaleSessions();
 
   let query = supabase
     .from("sessions")

@@ -36,7 +36,9 @@ export function createSttTtsTransport(): VoiceTransport {
           form.append("sessionId", sessionId);
           form.append("roundId", turn.roundId);
           form.append("offsetMs", String(turn.offsetMs));
-          form.append("audio", audio, "utterance.webm");
+          // The extension has to match the bytes: Whisper keys its decoder off
+          // the filename, and iOS hands over MP4, not WebM.
+          form.append("audio", audio, `utterance.${extensionFor(audio.type)}`);
 
           const response = await fetch("/api/voice/turn", {
             method: "POST",
@@ -62,6 +64,13 @@ export function createSttTtsTransport(): VoiceTransport {
       };
     },
   };
+}
+
+function extensionFor(mimeType: string): string {
+  if (mimeType.includes("mp4") || mimeType.includes("aac")) return "mp4";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
 }
 
 /* ==========================================================================

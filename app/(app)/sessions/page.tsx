@@ -40,7 +40,7 @@ export default async function SessionsPage({
             filtered list can be shared and reloaded. */}
         {data.tracks.length > 0 ? (
           <nav aria-label="Filter by track" className="flex flex-wrap items-center gap-4">
-            <Link href="/sessions" aria-current={!track ? "true" : undefined}>
+            <Link href="/sessions" className="inline-flex py-1" aria-current={!track ? "true" : undefined}>
               <PillTag
                 className={!track ? "bg-ink text-ink-inverse" : undefined}
               >
@@ -51,6 +51,7 @@ export default async function SessionsPage({
               <Link
                 key={t}
                 href={`/sessions?track=${t}`}
+                className="inline-flex py-1"
                 aria-current={track === t ? "true" : undefined}
               >
                 <PillTag
@@ -86,7 +87,7 @@ export default async function SessionsPage({
                 <TableRow key={row.id}>
                   <TableCell>
                     {row.overall !== null ? (
-                      <Link href={`/report/${row.id}`}>{row.title}</Link>
+                      <Link href={`/report/${row.id}`} className="inline-block py-2">{row.title}</Link>
                     ) : (
                       row.title
                     )}

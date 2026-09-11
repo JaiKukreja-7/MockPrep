@@ -16,6 +16,13 @@ import { ProviderError } from "../types";
  */
 const MODEL = "whisper-large-v3-turbo";
 
+function extensionFor(mimeType: string): string {
+  if (mimeType.includes("mp4") || mimeType.includes("aac")) return "mp4";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
+}
+
 export interface Transcription {
   text: string;
   /** Whisper's own measure of the clip, in ms. */
@@ -29,7 +36,11 @@ export async function transcribe(audio: Blob): Promise<Transcription> {
 
   return withBackoff(async () => {
     const form = new FormData();
-    form.append("file", audio, "utterance.webm");
+    // Whisper keys its decoder off the extension. The browser already named
+    // the upload from its real MIME type, so carry that through; iOS sends
+    // MP4/AAC, and calling it .webm makes the decode fail.
+    const name = audio instanceof File && audio.name ? audio.name : `utterance.${extensionFor(audio.type)}`;
+    form.append("file", audio, name);
     form.append("model", MODEL);
     form.append("response_format", "verbose_json");
 

@@ -34,6 +34,12 @@ export interface RuledRowProps
    * second border weight — the structure was already there.
    */
   progress?: number;
+  /**
+   * On narrow screens, drop the trailing slot beneath the title instead of
+   * squeezing the title beside it. For wide slots — a pill plus a score, a
+   * reserved flag column. A lone number on a meter row does not need it.
+   */
+  stackTrailing?: boolean;
 }
 
 /**
@@ -46,6 +52,7 @@ export function RuledRow({
   trailing,
   scale = "display",
   progress,
+  stackTrailing = false,
   className,
   ...props
 }: RuledRowProps) {
@@ -74,7 +81,15 @@ export function RuledRow({
         ) : null}
       </span>
 
-      {trailing ? <span className="shrink-0">{trailing}</span> : null}
+      {trailing ? (
+        <span
+          className={
+            stackTrailing ? "w-full shrink-0 sm:w-auto" : "shrink-0"
+          }
+        >
+          {trailing}
+        </span>
+      ) : null}
 
       {hasProgress ? (
         // aria-hidden: the value is already rendered as text in `trailing`,

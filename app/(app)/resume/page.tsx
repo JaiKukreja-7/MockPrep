@@ -36,7 +36,8 @@ export default async function ResumePage() {
                   key={a.id}
                   className="py-10"
                   scale="ui"
-                  title={<Link href={`/resume/${a.id}`}>{a.targetRole}</Link>}
+                  stackTrailing
+                  title={<Link href={`/resume/${a.id}`} className="inline-block py-2">{a.targetRole}</Link>}
                   meta={
                     <>
                       <time>{a.date}</time> <span aria-hidden>·</span>{" "}
@@ -46,8 +47,8 @@ export default async function ResumePage() {
                     </>
                   }
                   trailing={
-                    <span className="flex items-center gap-8">
-                      <span className="flex w-44 justify-center">
+                    <span className="flex items-center justify-between gap-8 sm:justify-start">
+                      <span className="flex sm:w-44 sm:justify-center">
                         <PillTag>{a.sourceKind}</PillTag>
                       </span>
                       <span className="numeric w-12 text-right text-u-lg">

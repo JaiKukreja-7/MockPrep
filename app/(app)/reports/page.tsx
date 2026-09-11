@@ -24,8 +24,9 @@ export default async function ReportsPage() {
                 key={report.id}
                 className="py-10"
                 scale="ui"
+                stackTrailing
                 title={
-                  <Link href={`/report/${report.id}`}>{report.title}</Link>
+                  <Link href={`/report/${report.id}`} className="inline-block py-2">{report.title}</Link>
                 }
                 meta={
                   <>
@@ -40,8 +41,8 @@ export default async function ReportsPage() {
                   </>
                 }
                 trailing={
-                  <span className="flex items-center gap-8">
-                    <span className="flex w-44 justify-center">
+                  <span className="flex items-center justify-between gap-8 sm:justify-start">
+                    <span className="flex sm:w-44 sm:justify-center">
                       <PillTag>{report.track}</PillTag>
                     </span>
                     <span className="numeric w-12 text-right text-u-lg">

@@ -297,7 +297,11 @@
   /* 3. Rows, not cards. Structure comes from 1px rules. */
   .row {
     display: flex;
-    gap: var(--s-8);
+    /* Wrap, so a wide trailing slot drops beneath the title on a phone
+       instead of crushing it. Row-gap is tighter than column-gap: a wrapped
+       slot is a second line of the same row, not a new row. */
+    flex-wrap: wrap;
+    gap: var(--s-4) var(--s-8);
     align-items: center;
     padding: var(--s-6) 0;
     border-bottom: var(--border-rule);
