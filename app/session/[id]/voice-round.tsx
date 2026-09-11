@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui";
+import { Button, Speaker, type SpeakerHandle, type SpeakerState } from "@/components/ui";
 import {
   createSttTtsTransport,
   primeSpeech,
@@ -47,6 +47,7 @@ export function VoiceRound({
   const [remaining, setRemaining] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const handleRef = useRef<VoiceSessionHandle | null>(null);
+  const speakerRef = useRef<SpeakerHandle>(null);
   const spokenForRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -81,6 +82,7 @@ export function VoiceRound({
         interrupt: false,
         onStart: () => setSpeaking(true),
         onEnd: () => setSpeaking(false),
+        onBoundary: () => speakerRef.current?.pulse(),
       });
 
       vlog("question.outcome", { questionId, outcome });
@@ -101,13 +103,8 @@ export function VoiceRound({
      question change, and a question change is exactly the moment an
      acknowledgement is mid-sentence — it would cut its own bridge line off
      before the next question started. Cancellation belongs to teardown only,
-     in the effect below.
-
-     readQuestion only sets state from speech-event callbacks (onstart/onend)
-     and from an awaited result, never synchronously during this effect; the
-     lint rule cannot see through the promise. */
+     in the effect below. */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void readQuestion(current.question, current.id);
   }, [current.id, current.question, readQuestion]);
 
@@ -178,6 +175,7 @@ export function VoiceRound({
         void speak(result.acknowledgement, {
           onStart: () => setSpeaking(true),
           onEnd: () => setSpeaking(false),
+          onBoundary: () => speakerRef.current?.pulse(),
         });
       }
 
@@ -199,8 +197,29 @@ export function VoiceRound({
 
   const recording = mic.state === "recording";
 
+  // Priority order matters: a turn in flight outranks everything, and
+  // speaking and recording cannot overlap because beginRecording cancels
+  // speech first.
+  const speakerState: SpeakerState = sending
+    ? "thinking"
+    : speaking
+      ? "speaking"
+      : recording
+        ? "listening"
+        : "idle";
+
   return (
     <div className="flex max-w-4xl flex-col gap-6">
+      {/* The interviewer, seen. Solid is the interviewer; hollow is you being
+          recorded — a split that survives prefers-reduced-motion, where the
+          breathing and the rings stop but the shapes do not. */}
+      <Speaker
+        ref={speakerRef}
+        state={speakerState}
+        level={mic.level}
+        className="h-24 w-40"
+      />
+
       {acknowledgement ? (
         <p className="text-u-body" aria-live="polite">
           {acknowledgement}
@@ -208,8 +227,7 @@ export function VoiceRound({
       ) : null}
 
       {sending ? (
-        <p className="flex items-center gap-4 text-u-lg" aria-live="polite">
-          <span aria-hidden className="size-2 animate-pulse rounded-pill bg-accent" />
+        <p className="text-u-lg" aria-live="polite">
           The interviewer is thinking…
         </p>
       ) : (
@@ -232,12 +250,17 @@ export function VoiceRound({
             </Button>
 
             <p className="flex items-center gap-3 text-u-eyebrow" aria-live="polite">
+              {/* Same convention as the speaker at small scale: solid for the
+                  interviewer, hollow for you. Not motion — shape. */}
               <span
                 aria-hidden
                 className={[
-                  "size-2 rounded-pill",
-                  speaking || recording ? "bg-accent" : "bg-transparent",
-                  speaking ? "animate-pulse" : "",
+                  "size-2 rounded-pill border",
+                  speaking
+                    ? "border-accent bg-accent"
+                    : recording
+                      ? "border-accent bg-transparent"
+                      : "border-transparent bg-transparent",
                 ].join(" ")}
               />
               {speaking

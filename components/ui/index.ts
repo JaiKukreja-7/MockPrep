@@ -8,6 +8,12 @@ export {
 export { Input, type InputProps } from "./input";
 export { PillTag, type PillTagProps } from "./pill-tag";
 export {
+  Speaker,
+  type SpeakerHandle,
+  type SpeakerProps,
+  type SpeakerState,
+} from "./speaker";
+export {
   RuledRow,
   RuledRowList,
   type RuledRowProps,

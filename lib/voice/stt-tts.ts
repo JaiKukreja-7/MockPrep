@@ -227,6 +227,7 @@ interface QueuedSpeech {
   chunks: string[];
   onStart?: () => void;
   onEnd?: () => void;
+  onBoundary?: () => void;
   settle: (outcome: SpeakOutcome) => void;
   started: boolean;
   finished: boolean;
@@ -312,6 +313,7 @@ function pump() {
 
   utterance.onboundary = (event) => {
     lastBoundaryChar = event.charIndex;
+    if (myGeneration === generation) current.onBoundary?.();
     vlog("chunk.boundary", {
       i: myIndex,
       charIndex: event.charIndex,
@@ -381,6 +383,8 @@ export interface SpeakOptions {
   interrupt?: boolean;
   onStart?: () => void;
   onEnd?: () => void;
+  /** Fires once per word as the synthesiser reaches it. Drives the speaker's rings. */
+  onBoundary?: () => void;
 }
 
 /**
@@ -422,6 +426,7 @@ export function speak(
         chunks: chunkForSpeech(text),
         onStart: options.onStart,
         onEnd: options.onEnd,
+        onBoundary: options.onBoundary,
         settle: resolve,
         started: false,
         finished: false,

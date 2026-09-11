@@ -3,7 +3,7 @@
 AI mock interview platform. Next.js 16 (App Router, Turbopack) + Tailwind v4 +
 Supabase. Free-tier LLMs only.
 
-**Read this file first.** Last updated 2026-09-06.
+**Read this file first.** Last updated 2026-09-11.
 
 ---
 
@@ -38,7 +38,7 @@ uppercase coming from `text-transform` with sentence case in the DOM.
 
 `Button` (filled 48px / outline 68px / `size="compact"` 40px), `Input`,
 `PillTag`, `RuledRow` + `RuledRowList` (`scale`, `meta`, `progress`), `Table`,
-`Heatmap`. Specimen sheet at `/test`.
+`Heatmap`, `Speaker`. Specimen sheet at `/test`.
 
 `RuledRow`'s `progress` draws the existing 2px `.link-bar` along the row's own
 1px rule — the rule *is* the meter track. No new element type, no third border
@@ -246,6 +246,48 @@ it loads cleanly with Groq as the only leg.
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
 
+### Visual speaker (step 9, 2026-09-11)
+
+The interviewer, seen. Direction B of three proposed — the accent dot that
+already marked state on the voice screen, promoted into a form. Abstract, no
+assets, no dependencies: inline SVG driven by `speechSynthesis` `onboundary`
+(rings) and mic RMS (fill). Accent on the grid, 1px hairlines, no gradient,
+no glow, no shadow.
+
+Four states, and the point is that they are distinct **by shape**, not motion:
+
+| state | form | driver |
+|---|---|---|
+| idle | small solid dot | — |
+| speaking | large solid dot, breathing; a hairline ring per word | `onboundary` |
+| listening | hollow circle filling from the bottom | mic RMS |
+| thinking | small dot with a 270° arc orbiting | — |
+
+**Solid is the interviewer; hollow is you.** That split is what lets a user
+tell "the interviewer is speaking" from "you are being recorded" at a glance,
+and it holds under `prefers-reduced-motion`, where the breathing, rings and
+orbit all stop. The small status dot beside the label follows the same
+solid/hollow convention at small scale, so the two indicators agree.
+
+Rings are the disciplined part. A natural pace is 3–5 words/s, and one ring
+per word at that rate stacks into a pulse that reads as glow. Two limits:
+**at most 3 alive**, and **at least 320ms between emissions**. Words inside
+the gap or over the cap are simply not drawn — the speech is not throttled,
+only the ink. The ring keyframe animates radius alone (no opacity) and the
+ring is removed at the end, because a fading ring is a glow. Under reduced
+motion rings are never emitted at all, since a ring that cannot expand is
+just a second circle.
+
+*Verified*: pulsed at 4.5 words/s, 60 samples over 3s — never more than 3
+rings, ~10px apart radially at any instant, reading as discrete marks. The
+ring keyframe compiled with `r` as its only animated property. The
+reduced-motion rule compiled inside `@layer components` with
+`animation: none` on all three classes. On a live voice session: present at
+160×96 beneath the question, question text intact, correct `aria-label`.
+
+Motion keyframes live in `globals.css` as a numbered rule (7) beside the
+others — the speaker is the one animated object in the system.
+
 ### TTS — three causes fixed (2026-09-06)
 
 Web Speech was wired but silent in Chrome. All three were real:
@@ -304,7 +346,14 @@ The multipliers were modelled against the captured numbers rather than picked:
 talking, which would have swapped twitchy for deaf. 1.8×/1.35× keeps it
 2.6–4.9× above the observed false fires. A `speech.detected` log line records
 sustained speech while nothing is playing, so a trace can show whether the bar
-is reachable by a real voice — **awaiting a confirming trace.**
+is reachable by a real voice.
+
+**PARKED (2026-09-11), to be revisited before deploy.** The adaptive detector
+is committed but unconfirmed by a trace. Two outcomes are possible and the log
+distinguishes them: questions play through and `speech.detected` appears when
+the candidate talks (fixed); or questions play through but `speech.detected`
+never appears (the bar is now too high — lower `IDLE_MULTIPLIER`). The
+instrumentation stays in until this is closed.
 
 And a consistency bug: the brain was composing its own copy of the next
 question, putting three different strings on screen (model paraphrase in the
@@ -360,13 +409,17 @@ implement `connect()`; nothing in the session UI changes, because the mic, level
 meter and barge-in all talk to `VoiceSessionHandle`. The full reasoning and the
 exact failing calls are recorded at the top of that file.
 
-### 2. Voice audio never actually heard
+### 2. Barge-in detector — parked until pre-deploy
 
-The Browser pane blocks `getUserMedia` (`NotAllowedError`) and has no audio out,
-so mic capture, the level meter under real input, barge-in, and TTS playback are
-**code-verified but not heard**. Voice turns were driven by posting real WAV
-audio to `/api/voice/turn` from inside the authenticated page — the same request
-the transport makes, minus `MediaRecorder`. Needs a pass in real Chrome.
+Voice has been heard in real Chrome and two traces captured; the cut-offs were
+barge-in firing on the synthesiser's own echo, not the 15s cutoff (see the
+barge-in section under Done). The adaptive replacement is committed but not yet
+confirmed by a trace. Return to this before deploy: run a voice round, speak
+once while nothing is playing, and check for `speech.detected` in
+`__voiceLog.dump()`.
+
+The Browser pane used for automated checks blocks `getUserMedia` and has no
+audio out, so this can only be closed from a real browser.
 
 ### 3. One escalated row left in the database
 
@@ -378,17 +431,14 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Hear voice in real Chrome.** Expect a "Let the interviewer speak" button on
-   the first question (autoplay), then automatic speech for questions 2 and 3,
-   a pulsing dot with "The interviewer is speaking", and barge-in cutting
-   playback with "You cut in — go ahead".
-2. **Build the Cloud Run relay** and point `answer_scoring`-style config at
-   `RelayVoiceTransport` for true speech-to-speech.
-5. **Timezone.** Dates render in the server's timezone. Fine while server-only;
+1. **Close the barge-in item before deploy** — see Blocked #2.
+2. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
+   true speech-to-speech.
+3. **Timezone.** Dates render in the server's timezone. Fine while server-only;
    needs a per-user timezone before any of it reaches a client.
-6. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the
+4. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the
    schema settles, and keep it in CI.
-7. **Queue is per-instance.** `CONCURRENCY = 2` is process-local; a
+5. **Queue is per-instance.** `CONCURRENCY = 2` is process-local; a
    multi-instance deploy needs Redis or provider-side quota.
 
 ---

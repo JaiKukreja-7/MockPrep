@@ -11,13 +11,14 @@ import {
   TableHeaderCell,
   TableRow,
 } from "@/components/ui";
+import { SpeakerDemo } from "./speaker-demo";
 
 export const metadata = {
   title: "Primitives — MockPrep",
 };
 
 /**
- * Specimen sheet for the five primitives. Every section runs once on white
+ * Specimen sheet for the primitives. Every section runs once on white
  * and once inside .surface-dark, since the primitives are built to invert
  * off currentColor rather than off a light/dark variant.
  */
@@ -92,8 +93,9 @@ export default function TestPage() {
         <p className="eyebrow">MockPrep design system</p>
         <h1 className="display text-d-hero">Primitives</h1>
         <p className="text-u-lg max-w-2xl">
-          Five primitives on the IGNITE-derived token set. Two radii, two
-          border weights, no shadows, no grey text.
+          Six of the seven primitives on the IGNITE-derived token set — the
+          heatmap lives on the dashboard. Two radii, two border weights, no
+          shadows, no grey text.
         </p>
       </header>
 
@@ -221,6 +223,18 @@ export default function TestPage() {
           Scores are uncoloured on purpose — rank and size carry the meaning.
           The digits are tabular, so 9, 84 and 108 stay in one column.
         </p>
+      </Section>
+
+      {/* ---------------------------------------------------- Speaker */}
+      <Section eyebrow="Primitive 06" title="Speaker">
+        <p className="text-u-body max-w-2xl">
+          The interviewer, seen. Solid is the interviewer, hollow is you —
+          a split that holds under reduced motion, where the breathing and the
+          rings stop but the shapes do not. Rings are capped at three and
+          spaced at least 320ms apart, so a natural word rate reads as
+          discrete marks rather than a pulse.
+        </p>
+        <SpeakerDemo />
       </Section>
     </main>
   );
