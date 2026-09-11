@@ -248,6 +248,45 @@ it loads cleanly with Groq as the only leg.
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
 
+### Cloud Run deploy — prepared and verified locally, not yet live (step 11, 2026-09-11)
+
+Neither `gcloud` nor Docker is on this machine and the Google account is the
+author's, so the deploy itself is a hand-off; see `DEPLOY.md`. Everything up
+to the hand-off is built and proven:
+
+- `next.config.ts` → `output: "standalone"`. `Dockerfile` is three stages
+  (`npm ci` → `next build` → node:24-alpine running `server.js` as the
+  `node` user, `HOSTNAME=0.0.0.0`, `PORT=8080`). `.dockerignore` keeps every
+  `.env*`, `.git`, `supabase/`, `scripts/` and `PROGRESS.md` out of the
+  context — entries are anchored, because an unanchored `supabase` also
+  removed `lib/supabase` from the rsync mirror used to test this.
+- **Nothing is baked.** The browser Supabase client is never imported, so
+  the `NEXT_PUBLIC_` pair is read only on the server, at request time. All
+  five variables mount from Secret Manager (`scripts/gcp-setup.sh` creates
+  them, prompting silently; `scripts/deploy.sh` mounts them with
+  `--set-secrets`). The image built from a context with no env at all.
+- **Found and fixed while proving that:** with no env at build time `/`
+  never touched `cookies()` and Next prerendered it as static HTML — deployed,
+  signed-in users would have got the landing page forever. `/` is now
+  `force-dynamic`; the route table shows `ƒ /`.
+- **Fail-closed, measured on the standalone build in production mode:** no
+  env → `500` on `/`, `/dashboard`, `/sign-in`, `/test` and `POST
+  /api/voice/turn`, with the proxy's "Supabase environment variables are
+  missing in production" message in the log. Env injected at runtime → `/`
+  200 with the headline, private routes 307 to `/sign-in?next=…`, the API
+  a JSON 401, `/_next/image` 200 (sharp is traced into standalone).
+- **Quota caps** are `consume_llm_quota` in Postgres under `FOR UPDATE`, so
+  they hold across instances by construction; `lib/llm/quota.ts` throws in
+  production if the function is missing rather than running uncapped. The
+  deployed-instance confirmation is a signed-in round then Settings — in
+  `DEPLOY.md`, along with an optional real-service fail-closed check via a
+  no-traffic revision with secrets cleared.
+- `scripts/verify-deploy.sh <url>` — twelve black-box checks; passes 11/12
+  against the local standalone, the twelfth being HTTP→HTTPS which only
+  Cloud Run's front end provides.
+- Sizing: 1 vCPU, 1 GiB (pdfjs holds a 4 MB PDF in memory), concurrency 20
+  (the in-process LLM queue runs two calls at a time), 0–2 instances, 300 s.
+
 ### Landing page (2026-09-11)
 
 `/` was the step-1 placeholder until now — a phone opening the app saw
@@ -287,9 +326,10 @@ zero tap targets under 40px, zero grey text, zero shadows, radii 4px/320px
 only, borders 1px/2px only, every font-size a token (plus `<sup>` at 0.75em).
 Hero: 4 lines / 26% of the viewport at 375, 3 lines at 768 and 1440.
 
-**Product screenshots — not yet captured** (see Next #1). The three files in
-`public/landing/` are untracked stand-ins so the layout could be verified;
-`scripts/capture-landing.mjs` replaces them with the real screens.
+Product screenshots are real captures from `scripts/capture-landing.mjs`:
+a visible Chrome, a sign-in typed there, the dev badge and account line
+stripped before each capture, the voice round captured mid-question after a
+trusted (CDP) click on the audio unlock.
 
 ### Stale live rounds are swept (2026-09-11)
 
@@ -569,13 +609,13 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Capture the landing-page screenshots.** `node scripts/capture-landing.mjs`
-   opens a visible Chrome at `/sign-in`, waits for a sign-in typed there, then
-   writes `public/landing/{dashboard,report,session}.png` at 1440×900 @2x —
-   the session one from a fresh voice round it starts. Commit the three
-   files. (The automated route was a headless Chrome handed the pane's
-   session cookie; the auto-mode classifier refused that, reasonably.)
-2. **Close the barge-in item before deploy** — see Blocked #2.
+1. **Go live.** Follow `DEPLOY.md`: billing + `gcloud auth login` (console,
+   yours), `scripts/gcp-setup.sh`, `scripts/deploy.sh`, then add the service
+   URL to Supabase → Authentication → URL Configuration, then
+   `scripts/verify-deploy.sh <url>` and one signed-in round to see the cap
+   count on Settings.
+2. **Close the barge-in item before deploy** — see Blocked #2. Still open;
+   the deploy above ships the parked detector as is.
 3. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
    true speech-to-speech.
 4. **Timezone.** Dates render in the server's timezone. Fine while server-only;

@@ -6,6 +6,12 @@ import { signInAsGuest } from "@/app/auth/actions";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
+// The redirect below reads the session cookie, but only when Supabase env is
+// present. An image is built with no env at all, and on that path the page
+// touches no request data — so Next would prerender it as static HTML and
+// serve signed-in users the landing page forever. Force it dynamic.
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "MockPrep — mock interviews that talk back",
   description:

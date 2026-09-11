@@ -1,0 +1,13 @@
+# Nothing from a local checkout that the image must not carry. Entries are
+# anchored to the context root: `supabase` alone would be the migrations
+# directory to Docker but every directory of that name to other tools.
+/node_modules
+/.next
+/.git
+/supabase
+/scripts
+/PROGRESS.md
+.env*
+!.env.local.example
+*.tsbuildinfo
+.DS_Store
