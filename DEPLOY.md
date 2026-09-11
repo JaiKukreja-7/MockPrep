@@ -1,113 +1,154 @@
-# Deploying MockPrep to Cloud Run
+# Deploying MockPrep to Cloud Run — from the console
 
-One container image, built by Cloud Build from the `Dockerfile`, run by Cloud
-Run, configured entirely from Secret Manager at start-up. The image carries no
-environment: `.dockerignore` keeps every `.env*` out of the build context, and
-nothing in the app reads a variable at build time, so the same image serves
-any project. `/` is forced dynamic for the same reason — with no env at build
-time Next would otherwise prerender it and skip the signed-in redirect.
+Cloud Run watches the GitHub repo, Cloud Build builds the `Dockerfile` on
+every push to `main`, and the service reads its five variables from Secret
+Manager at start-up. The image carries no environment: `.dockerignore` keeps
+every `.env*` out of the build context and nothing in the app reads a
+variable at build time, so the same image serves any project. `/` is forced
+dynamic for the same reason — with no env at build time Next would otherwise
+prerender it and skip the signed-in redirect.
 
-## What you do once, in the console
+Nothing below needs the `gcloud` CLI. `scripts/gcp-setup.sh` and
+`scripts/deploy.sh` do the same from a terminal that has the SDK, if one
+ever exists; `scripts/verify-deploy.sh` is plain curl and works anywhere.
 
-1. **Project and billing.** Pick or create a project at
-   console.cloud.google.com, then enable billing on it (Billing → Link a
-   billing account). Cloud Run will not deploy without a billing account even
-   inside the free tier.
-2. **Install the CLI and sign in.** This is the only interactive step; it
-   opens a browser for your Google account.
+The five values you will paste come from `.env.local`:
 
-   ```bash
-   brew install --cask google-cloud-sdk
-   ```
+| Secret name | From `.env.local` |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | the `https://….supabase.co` URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the publishable key |
+| `GEMINI_API_KEY` | Google AI Studio key |
+| `GROQ_API_KEY` | Groq key |
+| `OPENROUTER_API_KEY` | OpenRouter key |
 
-   ```bash
-   gcloud auth login
-   ```
+The first two are publishable, not secret, but they live in Secret Manager
+too so there is exactly one mechanism and nothing to bake into the image.
 
-3. **APIs and secrets.** Enables Cloud Run, Cloud Build, Artifact Registry and
-   Secret Manager, then prompts for each of the five values — copy them from
-   `.env.local`. Values are read silently and piped in; they never appear on a
-   command line. Pick the region closest to your Supabase project.
+## 1. Project and billing
 
-   ```bash
-   PROJECT=your-project-id REGION=us-central1 scripts/gcp-setup.sh
-   ```
+console.cloud.google.com → project picker in the top bar → **New project**
+→ name it → **Create**. Then ☰ → **Billing** → **Link a billing account**.
+Cloud Run will not create a service without one, even inside the free tier.
 
-## Deploy
+## 2. Secrets — five times
 
-```bash
-PROJECT=your-project-id REGION=us-central1 scripts/deploy.sh
-```
+☰ → **Security** → **Secret Manager** → **Enable** the API if prompted →
+**Create secret**. For each row of the table:
 
-Builds remotely (a few minutes the first time), deploys, and prints the
-service URL — `https://mockprep-<number>.<region>.run.app`. Re-run to ship a
-new version; it is the whole release process.
+- **Name**: exactly the secret name from the table. The service maps each
+  one to the environment variable of the same name.
+- **Secret value**: paste the value from `.env.local` — the value only, no
+  quotes, no trailing newline.
+- Leave replication, rotation and expiry alone. **Create secret**.
 
-## After the first deploy: Supabase
+## 3. The service
 
-Magic links and the auth callback land on the production origin, which
-Supabase has to be told about. Supabase dashboard → Authentication → URL
-Configuration:
+☰ → **Cloud Run** → **Create service**. Enable the API if prompted.
+
+Under **Source**, choose **Continuously deploy from a repository (source or
+function)** → **Set up with Cloud Build**:
+
+- **Repository provider**: GitHub. **Authenticate** in the popup; install
+  the *Google Cloud Build* GitHub app when asked and grant it
+  `JaiKukreja-7/MockPrep`. If the repo is not in the list, **Manage
+  connected repositories** and add it. Select it, tick the consent box,
+  **Next**.
+- **Branch**: `^main$` (the default).
+- **Build Type**: **Dockerfile**.
+- **Source location**: `/Dockerfile`. Leave the build context at `/`.
+- **Save**.
+
+Back on the form:
+
+- **Service name**: `mockprep`.
+- **Region**: the one nearest your Supabase project (Supabase dashboard →
+  Project Settings → General shows its region).
+- **Authentication**: **Allow unauthenticated invocations**. The app does
+  its own auth; Cloud Run has to let the public in.
+- **Billing**: Request-based.
+- **Service scaling**: minimum instances `0`; expand it and set maximum
+  instances `2`.
+- **Ingress**: All.
+
+Expand **Container(s), volumes, networking, security**:
+
+- **Container port**: `8080`. The Dockerfile sets `PORT=8080` and Cloud Run
+  sends the same value, so the server binds the right port either way.
+- **Resources**: Memory `1 GiB`, CPU `1`. pdfjs holds a 4 MB PDF in memory
+  while it reads it; 512 MiB is too tight.
+- **Requests**: Request timeout `300` seconds. Maximum concurrent requests
+  per instance `20` — the in-process LLM queue runs two provider calls at
+  a time, so more requests per instance would only wait longer.
+- **Variables & Secrets** tab → **Reference a secret**, five times:
+  - **Secret**: pick it from the list.
+  - **Reference method**: **Exposed as environment variable**.
+  - **Name**: the same name as the secret, e.g. `GEMINI_API_KEY`.
+  - **Version**: `latest`.
+  - If a yellow bar says the service account lacks access, click **Grant**
+    on it. That gives the Compute Engine default service account — what the
+    service runs as — *Secret Manager Secret Accessor*. Without it the
+    first revision fails to start with a permissions error on the secret.
+- Security and Networking stay default.
+
+**Create**. The first build takes a few minutes; watch it on the service's
+**Revisions** tab or ☰ → **Cloud Build** → **History**. When the revision
+goes green the URL is at the top of the service page:
+`https://mockprep-<number>.<region>.run.app`.
+
+From now on every push to `main` builds and deploys. That is the whole
+release process.
+
+## 4. Supabase — tell it about the new origin
+
+Magic links and the auth callback land on the production origin, and
+Supabase only follows redirects it has been told about. Supabase dashboard
+→ **Authentication** → **URL Configuration**:
 
 - **Site URL**: the service URL.
-- **Redirect URLs**: add `https://<service-url>/auth/callback`. Keep
-  `http://localhost:3000/auth/callback` for development.
+- **Redirect URLs** → **Add URL**: `https://<service-url>/auth/callback`.
+  Keep `http://localhost:3000/auth/callback` for development.
 
-Until this is done, sign-in emails will link back to localhost.
+Until this is done, sign-in emails link back to localhost.
 
-## Verify
+## 5. Verify
+
+Plain bash and curl:
 
 ```bash
 scripts/verify-deploy.sh https://mockprep-<number>.<region>.run.app
 ```
 
-Twelve checks from outside: landing serves, every private route redirects to
-sign-in, the API returns a JSON 401 without a session, the screenshots and
-image optimiser work, HTTP redirects to HTTPS.
+Twelve checks from outside: the landing page serves, every private route
+redirects to sign-in, the API returns a JSON 401 without a session, the
+screenshots and the image optimiser work, HTTP redirects to HTTPS.
 
-**The quota cap** cannot be checked from outside — it needs a signed-in round.
-On the live URL, sign in (or "Try a round as a guest"), start a text round,
-then open Settings: the usage line should read one used against the cap.
-The cap is enforced by `consume_llm_quota` inside Postgres with a row lock,
-so it holds across instances by construction; this check confirms the
-deployed instance is calling it. If the function were missing, the round
-would fail with a 500 rather than run uncapped — `lib/llm/quota.ts` throws in
-production.
+**The quota cap** cannot be checked from outside — it needs a signed-in
+round. On the live URL, sign in (or *Try a round as a guest*), start a text
+round, then open **Settings**: the usage line should read one used against
+the cap. The cap is `consume_llm_quota` in Postgres under a row lock, so it
+holds across instances by construction; this confirms the deployed instance
+is calling it. If the function were missing the round would fail with a 500
+rather than run uncapped — `lib/llm/quota.ts` throws in production.
 
-**Fail-closed on the real service** (optional, one minute): deploy a
-no-traffic revision with the secrets removed, hit its tagged URL, expect 500
-on every route, then remove it. Live traffic stays on the good revision
-throughout — `--no-traffic` leaves it pinned there.
-
-```bash
-gcloud run deploy mockprep --region us-central1 --image "$(gcloud run services describe mockprep --region us-central1 --format='value(spec.template.spec.containers[0].image)')" --clear-secrets --no-traffic --tag noenv
-```
-
-It prints the tag URL, `https://noenv---mockprep-<…>.run.app`. Expect `500`:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://noenv---mockprep-<…>.run.app/
-```
-
-Then drop the tag, delete the revision (the newest, so `--limit 1`), and
-un-pin traffic. Order matters: `--no-traffic` pins the service to the good
-revision, and until `--to-latest` is restored every future deploy would
-receive 0% — but `--to-latest` must run only once the broken revision is
-gone, or it would be the latest.
-
-```bash
-gcloud run services update-traffic mockprep --region us-central1 --remove-tags noenv && gcloud run revisions delete "$(gcloud run revisions list --service mockprep --region us-central1 --limit 1 --format='value(metadata.name)')" --region us-central1 --quiet && gcloud run services update-traffic mockprep --region us-central1 --to-latest
-```
+**Fail-closed on the real service** (optional): on the service page, **Edit
+& deploy new revision** → **Variables & Secrets** → remove all five secret
+references → untick **Serve this revision immediately** → **Deploy**. Live
+traffic stays on the good revision. On the **Revisions** tab open the new
+revision; its own address is shown there
+(`https://<revision>---mockprep-<…>.run.app`). Every route on it should be a
+500 and its **Logs** should show *Supabase environment variables are
+missing in production*. Then delete that revision from the Revisions tab
+(⋮ → **Delete**). Traffic was never on it.
 
 ## Sizing, and what is not yet production-grade
 
-- 1 vCPU, 1 GiB (pdfjs holds a 4 MB PDF in memory), concurrency 20, 0–2
-  instances, 300 s timeout. Scale to zero means the first request after a
-  quiet spell takes a few seconds.
+- 1 vCPU, 1 GiB, concurrency 20, 0–2 instances, 300 s timeout. Scale to
+  zero means the first request after a quiet spell takes a few seconds.
 - The LLM queue (`lib/llm/queue.ts`, two calls at a time with backoff) is
   per instance. Two instances means up to four concurrent provider calls,
-  which is inside every free tier's rate limit. Raise `--max-instances`
-  only with that in mind.
+  inside every free tier's rate limit. Raise the maximum only with that in
+  mind.
 - The stale-round sweep runs on read, not on a schedule; nothing here needs
   Cloud Scheduler yet.
-- Logs: `gcloud run services logs read mockprep --region us-central1`.
+- Logs: the service page → **Logs** tab.

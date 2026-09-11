@@ -251,7 +251,13 @@ cannot resolve, and every PDF fails with "Setting up fake worker failed".
 ### Cloud Run deploy — prepared and verified locally, not yet live (step 11, 2026-09-11)
 
 Neither `gcloud` nor Docker is on this machine and the Google account is the
-author's, so the deploy itself is a hand-off; see `DEPLOY.md`. Everything up
+author's, so the deploy itself is a hand-off; see `DEPLOY.md`, written for
+the console (GitHub-connected build). The repo is public at
+github.com/JaiKukreja-7/MockPrep since 2026-09-11; before the first push every
+blob in history was searched for the four real key values from `.env.local`
+and for key-shaped strings, JWTs, private keys, `service_role`, passwords,
+emails, the project ref and LAN addresses — nothing, and the one screenshot
+commit that had carried an email was already unreachable and was pruned. Everything up
 to the hand-off is built and proven:
 
 - `next.config.ts` → `output: "standalone"`. `Dockerfile` is three stages
@@ -609,11 +615,13 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Go live.** Follow `DEPLOY.md`: billing + `gcloud auth login` (console,
-   yours), `scripts/gcp-setup.sh`, `scripts/deploy.sh`, then add the service
-   URL to Supabase → Authentication → URL Configuration, then
-   `scripts/verify-deploy.sh <url>` and one signed-in round to see the cap
-   count on Settings.
+1. **Go live.** Follow `DEPLOY.md` — the console path, click by click: a
+   GitHub-connected Cloud Run service (repo `JaiKukreja-7/MockPrep`, branch
+   `^main$`, build type Dockerfile) with the five values referenced from
+   Secret Manager on the Variables & Secrets tab. No SDK: this machine has
+   1.3 GB free and cannot take it. Then add the service URL to Supabase →
+   Authentication → URL Configuration, run `scripts/verify-deploy.sh <url>`
+   (plain curl), and one signed-in round to see the cap count on Settings.
 2. **Close the barge-in item before deploy** — see Blocked #2. Still open;
    the deploy above ships the parked detector as is.
 3. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
