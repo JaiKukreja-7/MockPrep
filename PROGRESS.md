@@ -50,6 +50,7 @@ screen still reads as the system.
 
 | Route | State |
 |---|---|
+| `/` | Landing page from the frames; signed-in users go to `/dashboard` |
 | `/sign-in` | Magic link + password + guest |
 | `/dashboard` | Real data, empty states, 12-month heatmap |
 | `/session/[id]` | Live round, text and voice |
@@ -246,6 +247,49 @@ it loads cleanly with Groq as the only leg.
 `serverExternalPackages: ["pdfjs-dist", "mammoth"]` is load-bearing: bundled
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
+
+### Landing page (2026-09-11)
+
+`/` was the step-1 placeholder until now — a phone opening the app saw
+"MOCKPREP" and nothing else. Built from `01-hero` … `06-footer-supercharged`
+in order: top bar (wordmark, sign-in, CTA pill — no nav, no counts), hero
+(intro at `--d-body-lg`, `--d-hero` headline with the last sentence in the
+accent), a static strip, three feature sections (centred eyebrow, `--d-hero`
+headline, one paragraph, one screenshot in a 1px rule at the surface radius),
+the ruled index (`--d-mid` rows with pills, outline pill beneath), the black
+statement (`--d-hero` and a paragraph beside four ruled facts), then the
+two-panel footer: black (mark, "How it runs", small print) and accent
+(`--d-setpiece` OUT / LOUD with "Where to next?").
+
+Anyone with a session — email or guest — is redirected to `/dashboard`; the
+page is for people without one. Guarded by `hasSupabaseEnv()` so it still
+renders in a checkout with no env.
+
+Decisions made on the way, none of them token changes:
+- **The strip carries the four tracks, not logos.** There are no client
+  logos, and employer marks would be a claim the product cannot make. The
+  track names in the display face do the same job.
+- **The set-piece is OUT / LOUD, one word a line.** At 27vw, Archivo at wdth
+  62 is wider than the frame's cut: "OUT LOUD" on one line is 1104px+ at
+  1440. Two words on two lines is the frame's own composition (SUPERCHARGED /
+  DIGITAL), so nothing was lost.
+- **The wordmark stays at `--u-body`** on the landing page, as on every other
+  screen, rather than the frame's ~48px. One mark, one size. Flagged, not
+  hidden — the frame is bigger.
+- **A 1px rule seams the black statement into the black footer panel.** Two
+  black blocks back to back had no boundary.
+- **Hero sentences are block spans** so a phone breaks between sentences
+  ("Say it / out loud." with a no-wrap on the phrase), never inside one.
+
+*Verified at 375, 768 and 1440* from a signed-out headless Chrome, by
+measurement: zero page overflow, zero elements whose text exceeds their box,
+zero tap targets under 40px, zero grey text, zero shadows, radii 4px/320px
+only, borders 1px/2px only, every font-size a token (plus `<sup>` at 0.75em).
+Hero: 4 lines / 26% of the viewport at 375, 3 lines at 768 and 1440.
+
+**Product screenshots — not yet captured** (see Next #1). The three files in
+`public/landing/` are untracked stand-ins so the layout could be verified;
+`scripts/capture-landing.mjs` replaces them with the real screens.
 
 ### Stale live rounds are swept (2026-09-11)
 
@@ -525,14 +569,20 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Close the barge-in item before deploy** — see Blocked #2.
-2. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
+1. **Capture the landing-page screenshots.** `node scripts/capture-landing.mjs`
+   opens a visible Chrome at `/sign-in`, waits for a sign-in typed there, then
+   writes `public/landing/{dashboard,report,session}.png` at 1440×900 @2x —
+   the session one from a fresh voice round it starts. Commit the three
+   files. (The automated route was a headless Chrome handed the pane's
+   session cookie; the auto-mode classifier refused that, reasonably.)
+2. **Close the barge-in item before deploy** — see Blocked #2.
+3. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
    true speech-to-speech.
-3. **Timezone.** Dates render in the server's timezone. Fine while server-only;
+4. **Timezone.** Dates render in the server's timezone. Fine while server-only;
    needs a per-user timezone before any of it reaches a client.
-4. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the
+5. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the
    schema settles, and keep it in CI.
-5. **Queue is per-instance.** `CONCURRENCY = 2` is process-local; a
+6. **Queue is per-instance.** `CONCURRENCY = 2` is process-local; a
    multi-instance deploy needs Redis or provider-side quota.
 
 ---
