@@ -18,7 +18,8 @@ system's rules as component classes.
 
 The `@theme` block **deletes** default namespaces so off-system values cannot be
 typed: `--color-*` (no `text-zinc-500` to reach for), `--text-*` (no
-`text-sm`/`text-3xl`, so the UI scale's cliff holds), `--radius-*` (only
+`text-sm`/`text-3xl`, so the UI scale's cliff holds — `--u-display` is fluid
+below ~580px, see Mobile), `--radius-*` (only
 `rounded-surface` 4px and `rounded-pill`), and every shadow namespace.
 `--font-serif`/`--font-mono` are cleared to bar a third typeface.
 
@@ -302,7 +303,42 @@ the session screen the question's height as a share of the viewport.
 *Verified at both widths*: sign-in, dashboard, sessions (table scrolls in its
 container), reports, questions, settings, resume, resume/[id], report/[id],
 landing, session text, session voice. Zero page overflow on every screen at
-768 and on every screen at 375 **except the session screen — see Blocked**.
+both widths — the session screen was the last holdout, closed by the
+`--u-display` change below.
+
+### `--u-display` is fluid (2026-09-11, decided by the brief's author)
+
+The session question at a fixed 4rem failed at 375 on two counts, measured:
+a 117-char question ran **707px, 87% of the viewport**, putting the textarea
+at y=930; and the single word "MARKETPLACE?" at 64px condensed was 352px in a
+311px column, pushing the whole page 10px wide. Structural, not a layout bug:
+`--d-hero` also bottoms out at 4rem, so below ~530px neither scale had a
+display size under 64px. The UI scale never got a phone step.
+
+Chosen: `--u-display: clamp(2.5rem, 11vw, 4rem)` — 41px at 375, 64px from
+~580px up. One token value changed, in both the `@theme` block and its
+`:root` mirror; no screen touched. The rejected alternative was stepping only
+the question down to `--d-mid` below `sm`, which would have used `--d-mid`
+outside its documented role and left the question no longer the big number.
+
+The note in the token file records why the ratio to `--u-lg` narrows to
+**~2× on a phone from 3.2× at desktop**: the cliff is shallower there by
+necessity, not abandoned. Nothing was added between the two steps.
+
+*Re-verified at 375*, same method:
+
+| | text round | voice round |
+|---|---|---|
+| question | 20 words | 22 words |
+| at 41px | 351px, **43%**, 10 lines | 316px, **39%** |
+| same question at 64px | 870px, 107% | 870px, 107% |
+| longest word | "marketplace" 211px in 311 | "supply-side" 176px in 311 |
+| in the first screen | textarea at y=574 | Speaker 511–607, record 631–679, meter |
+| page overflow | 0 | 0 |
+
+Dashboard and report scores at 375: **41.25px against a next-largest 20px**
+— still the one big number on the screen, ratio 2.06. At 768 everything
+computes to 64px exactly as before; the tablet measurements are unchanged.
 
 ### Visual speaker (step 9, 2026-09-11)
 
@@ -479,48 +515,7 @@ once while nothing is playing, and check for `speech.detected` in
 The Browser pane used for automated checks blocks `getUserMedia` and has no
 audio out, so this can only be closed from a real browser.
 
-### 3. `--u-display` at 375 — a genuine gap in the type scale (DECISION)
-
-The session question is set at `--u-display` (4rem = 64px) with the display
-treatment. At 375 it does not work, on two counts, both measured:
-
-| | voice round | text round |
-|---|---|---|
-| question | 106 chars | 117 chars |
-| height | 598px, **74% of viewport**, 11 lines | 707px, **87%**, 13 lines |
-| below the fold | Speaker, record control, level meter | textarea at y=930 |
-
-And width: the `h1` is 311px wide but its content is **352px** — the single
-word "MARKETPLACE?" at 64px condensed does not fit the column, and that alone
-pushes the whole page 10px wide. At 768 the same questions run 272px (27%)
-with no overflow; the failure is phone-specific.
-
-The cause is structural. `--u-display` is a fixed 4rem. The display scale's
-own fluid step, `--d-hero`, is `clamp(4rem, 13.6vw, 12.2rem)` — it also
-bottoms out at 4rem. So below ~530px there is **no display size smaller than
-64px in either scale**; the next step down is `--d-mid` (38px, documented as
-project row titles only) or `--u-lg` (20px). The UI scale was built for the
-dashboard at desktop and never had a phone step.
-
-Two ways through, neither taken silently:
-
-**A. Make `--u-display` fluid** — `clamp(2.5rem, 11vw, 4rem)`: 41px at 375,
-64px from ~580px up. Keeps the name, keeps the cliff above `--u-lg`, keeps
-"one big number per screen" — the number just gets smaller on a phone, on
-every screen (scores go 64 → 41 at 375). At 41px the 117-char question is
-~7 lines, ~30% of the viewport, and "MARKETPLACE?" is ~225px, inside the
-column. One token value changes; nothing else does. *Recommended.*
-
-**B. Step only the question down** — `text-d-mid sm:text-u-display` on the
-session `h1`. No token changes, scores untouched, but `--d-mid` is used
-outside its documented role and the question stops being "the one big
-number".
-
-The question bank has a milder version of the same thing — `--d-mid` titles
-for sentence-length questions run 333px at 375 — but it is a list, scrolling
-is expected, and nothing important sits beneath. Not blocking.
-
-### 4. One escalated row left in the database
+### 3. One escalated row left in the database
 
 The guest row used to prove the escalation still has `is_guest: false,
 daily_request_cap: 9999`. Throwaway anonymous user, hole now closed, but it can
@@ -561,6 +556,13 @@ nothing. OpenRouter stays as the second leg so the chain still has two.
 entire transcript below the fold, on the one screen where all three must be
 visible at once. `--u-display` with the display *treatment* (Archivo condensed,
 uppercase, 0.85) keeps it commanding and everything above the fold.
+
+**`--u-display` is fluid, not stepped.** When the fixed 4rem failed at 375 the
+choice was between making the token fluid and dropping the question alone to
+`--d-mid` on phones. Fluid won: the name stays, the cliff stays, scores and
+question shrink together, and no size is borrowed from a role it was not
+documented for. The cost is a shallower cliff on a phone (~2× instead of
+3.2×), which the token file says out loud.
 
 **Sub-scores are fixed columns, not rows,** because the design fixes them at
 three. A fourth should be a deliberate migration, not something a writer can do

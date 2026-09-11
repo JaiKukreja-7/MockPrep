@@ -56,7 +56,13 @@
   --text-u-eyebrow:  0.8125rem;                    /* 13px */
   --text-u-body:     0.9375rem;                    /* 15px */
   --text-u-lg:       1.25rem;                      /* 20px */
-  --text-u-display:  4rem;                         /* 64px — the one big number per screen */
+  /* 64px from ~580px up; 41px at 375. The one big number per screen.
+     Fluid because neither scale had a display size under 64px, and 64px
+     condensed cannot fit a single long word in a 311px column. Note the
+     ratio to --u-lg narrows to ~2× on a phone from 3.2× at desktop: the
+     cliff is shallower there by necessity, not abandoned. Nothing was
+     added between the two steps and nothing should be. */
+  --text-u-display:  clamp(2.5rem, 11vw, 4rem);
 
   /* ---- Colour ----
      The stock palette is deleted. There is no zinc-500 to reach
@@ -131,7 +137,7 @@
   --u-micro:    0.75rem;
   --u-body:     0.9375rem;
   --u-lg:       1.25rem;
-  --u-display:  4rem;
+  --u-display:  clamp(2.5rem, 11vw, 4rem);  /* see the @theme note */
 
   /* ---- Colour ---- */
   --bg:            #FFFFFF;
