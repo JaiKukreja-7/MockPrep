@@ -97,7 +97,11 @@ goes green the URL is at the top of the service page:
 `https://mockprep-<number>.<region>.run.app`.
 
 From now on every push to `main` builds and deploys. That is the whole
-release process.
+release process. The image build runs the unit test project before
+`next build` (`npm run build` is `npm run test:unit && next build`), so a
+red invariant fails the deploy; the integration and design-audit projects
+run in GitHub Actions (`.github/workflows/ci.yml`) and need the two public
+Supabase variables as repository secrets.
 
 ## 4. Supabase — tell it about the new origin
 

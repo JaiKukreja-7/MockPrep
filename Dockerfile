@@ -13,6 +13,8 @@ RUN npm ci
 # every variable, including the NEXT_PUBLIC_ pair, is read by the server at
 # request time from the environment Cloud Run injects. The build itself
 # needs none of them — every page that touches Supabase is dynamic.
+# `npm run build` runs the unit test project before `next build`, so a red
+# invariant (an unsafe route, a redaction gap) fails the image, not just CI.
 FROM node:24-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1

@@ -248,6 +248,91 @@ it loads cleanly with Groq as the only leg.
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
 
+### Automated tests (step 13, 2026-09-16)
+
+Vitest 5, three projects in `vitest.config.mts`, each with a different cost:
+
+| Project | Needs | Runs where |
+|---|---|---|
+| `unit` — `tests/unit/` | nothing | `npm run build` (so the Cloud Run image build), CI |
+| `integration` — `tests/integration/` | the two public Supabase variables | CI with secrets, locally from `.env.local` |
+| `e2e` — `tests/e2e/` | the same two, a Chromium | CI (Playwright's), locally (the installed Chrome) |
+
+`npm run build` is now `npm run test:unit && next build`; a failing invariant
+fails the image. `.github/workflows/ci.yml` runs all three on push; the two
+that need secrets **fail** without them rather than skip — a check that
+silently skips has stopped checking. `server-only` is aliased to an empty
+module under test so the server modules import.
+
+**Unit (56):**
+- Route table: importing `routing.ts` with a registry whose Groq policy has
+  become training-eligible throws naming `resume_analysis` and `groq`; the
+  real table passes; non-sensitive tasks may route anywhere; `runTask`
+  refuses a sensitive step even when the chain is assembled after import.
+- Redaction: the full table (11 redacted forms including `(03) 9000 0000`,
+  10 preserved forms — year ranges, WAM, dollar figures, GPA, percentages),
+  the mixed sentence, no stray bracket.
+- Redact-before-truncate through `analyseResume` itself: an email at
+  position 150 of a 200-char excerpt comes out as `[email]` in ≤160 chars;
+  the control shows truncate-first would have stored `jane.doe@e`.
+- Providers with `fetch` stubbed: 429 retryable with Retry-After in ms, 5xx
+  retryable, 400/401/404 not; an empty 200 with `finish_reason: length`
+  (Groq/OpenRouter) or `MAX_TOKENS` (Gemini) retryable; whitespace content
+  never reaches the parser; unconfigured provider never touches the network.
+- Failover through the real `runTask → withBackoff` with a faked clock: five
+  429s sleep exactly 1000+2000+4000+8000 ms then the chain moves on; a 401
+  moves on after one attempt and 0 ms; Retry-After 5 s beats the 1 s step;
+  an empty-200 retries the same provider once; unconfigured providers are
+  logged and skipped; exhaustion throws `AllProvidersFailedError` listing
+  every attempt.
+- `parseJson`: think blocks (multi-line, mixed case), both fence forms,
+  preamble, braces inside strings, first-object-only, arrays, the
+  no-JSON error quoting the response.
+- `extractFlags`: interviewer lines, hallucinated indexes, non-integers,
+  unknown flag names and junk entries dropped; string indexes coerced.
+
+**Integration (9)**, as a fresh anonymous user against the real project:
+`consume_llm_quota` — 0 of 10 to start, 9 spent, an overshoot rejected with
+`used` unchanged, **two simultaneous requests for the last unit with exactly
+one allowed**, then everything rejected at 10. Column grants — `is_guest`,
+`daily_request_cap`, `daily_voice_sec_cap` each `42501`; `display_name`
+accepted and read back with the other two untouched. Each run leaves one
+anonymous user; the cleanup SQL is in the test's header.
+
+**Design audit (28 + 9 conditional)** — `tests/e2e/design-audit.test.ts`,
+Playwright over the production build (`next start` on 3100 from
+`global-setup.ts`), at 375 / 768 / 1440: grey text (alpha < 1 on any element
+with its own text), radii ∈ {0, 4px, 320px}, drawn borders ∈ {1px, 2px},
+no box-shadow, every text element's font-size equal to what some `--text-*`
+token resolves to at that viewport (token list read from the stylesheet, so
+new tokens count and off-token sizes fail), every numeric readout tabular.
+Routes: `/`, `/sign-in`, `/test` signed out; `/dashboard`, `/sessions`,
+`/reports`, `/questions`, `/settings`, `/resume` as a guest. With
+`E2E_EMAIL`/`E2E_PASSWORD` set it also audits `/report/[id]`,
+`/resume/[id]`, `/session/[id]` from that account's data; without them those
+nine cases are skipped by name. **Self-test**: one planted violation of each
+rule on `/test` must be reported and nothing else — an audit that never fails
+is not evidence.
+
+**Coverage** (`npm run test:coverage`, unit + integration, `lib/**` minus
+types and voice): 33% of lines overall. Where the invariants live it is
+high — `routing.ts`, `json.ts`, `extract-flags.ts`, `openai-compatible.ts`,
+`analyse-resume.ts`, `redact.ts` at 100% lines; `index.ts` 100%; `queue.ts`
+93%; `gemini.ts` 57%. At 0%: `lib/data/*` (Supabase queries behind RLS —
+only meaningfully testable as integration with seeded data), `quota.ts`
+(the TS wrapper; the SQL it calls is tested), `registry.ts` (env reads),
+`generate-questions` / `score-answer` / `interviewer-turn` / `transcribe`
+(thin prompts over `runTask`, plus Whisper), `resume/extract.ts` (pdfjs and
+mammoth on real files), `rounds/score.ts` and `sweep.ts`, `supabase/*`.
+
+**Not testable without a human, and not faked:** the microphone and the
+analyser (calibration, echo floor, barge-in firing, the control-case
+indicator), speech synthesis and its boundary events, the Speaker rings,
+iOS Safari behaviour, and the actual sound of a round. The debug panel
+(step 12) is the instrument for those. Also not covered: LLM output quality
+(scoring, question generation — network, quota, non-deterministic), Whisper
+transcription, real PDF/DOCX extraction on the user's files.
+
 ### Barge-in debug panel (step 12, 2026-09-16)
 
 Two console traces produced three wrong diagnoses because the numbers the
