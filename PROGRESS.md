@@ -264,7 +264,7 @@ that need secrets **fail** without them rather than skip — a check that
 silently skips has stopped checking. `server-only` is aliased to an empty
 module under test so the server modules import.
 
-**Unit (56):**
+**Unit (94 after the follow-ups below; 56 at first):**
 - Route table: importing `routing.ts` with a registry whose Groq policy has
   become training-eligible throws naming `resume_analysis` and `groq`; the
   real table passes; non-sensitive tasks may route anywhere; `runTask`
@@ -314,16 +314,50 @@ nine cases are skipped by name. **Self-test**: one planted violation of each
 rule on `/test` must be reported and nothing else — an audit that never fails
 is not evidence.
 
-**Coverage** (`npm run test:coverage`, unit + integration, `lib/**` minus
-types and voice): 33% of lines overall. Where the invariants live it is
-high — `routing.ts`, `json.ts`, `extract-flags.ts`, `openai-compatible.ts`,
-`analyse-resume.ts`, `redact.ts` at 100% lines; `index.ts` 100%; `queue.ts`
-93%; `gemini.ts` 57%. At 0%: `lib/data/*` (Supabase queries behind RLS —
-only meaningfully testable as integration with seeded data), `quota.ts`
-(the TS wrapper; the SQL it calls is tested), `registry.ts` (env reads),
-`generate-questions` / `score-answer` / `interviewer-turn` / `transcribe`
-(thin prompts over `runTask`, plus Whisper), `resume/extract.ts` (pdfjs and
-mammoth on real files), `rounds/score.ts` and `sweep.ts`, `supabase/*`.
+**Follow-ups (same day):**
+- *Empty 200 decided.* `ProviderError.retryable` is now `boolean | "once"`.
+  An empty answer with the budget spent (`finish_reason: length` /
+  `MAX_TOKENS`) stays fully retryable; an otherwise-clean empty 200 is
+  retried exactly once per `withBackoff` call, then the chain moves on — a
+  hiccup gets one more try so a round is not lost to it, a second empty
+  means the provider is empty today and 2/4/8s more would only delay the
+  failover. `withBackoff` tracks the single "once" retry independently of
+  the 429 ladder (tested: 429, 429, empty, 429, empty sleeps four steps and
+  then fails over).
+- *Integration tests clean up.* `supabase/migrations/20260916000000_delete_own_guest.sql`
+  adds `delete_own_guest()`: SECURITY DEFINER, deletes the caller's own
+  `auth.users` row only if it is anonymous, and everything cascades. The
+  suite's `afterAll` calls it and fails loudly, naming the migration, if it
+  is missing — **the integration project is red until that migration is
+  applied.** Also a product affordance in waiting: a guest who wants
+  nothing kept.
+- *Coverage gaps filled* with a recording fake of the query builder
+  (`tests/support/fake-supabase.ts`): `rounds/sweep.ts` (threshold, measured
+  from the newest line not the start, status guard on the update, the
+  one-query newest-line map), `rounds/score.ts` (cap stops before the read,
+  Q/A exchange text, the four numbers, flag index → row id mapping, session
+  close, model failure without a write), `llm/quota.ts` (arg passthrough,
+  bare row and array, no row, PGRST202 throws in production and warns once
+  in dev, other errors rethrown). `resume/extract.ts` against generated
+  fixtures (`tests/fixtures/generate.py`, no dependencies): a PDF whose name
+  is one text item per glyph — pdfjs returns `P`,`R`,`I`,`Y`,`A`,` `,… with
+  no `hasEOL`, the extractor reads `PRIYA RAMAN`, and the control asserts a
+  space-join of those exact items is `P R I Y A   R A M A N`; a no-text PDF
+  refused as a scan; a DOCX; a too-short DOCX; the size, empty and type
+  guards. Getting pdfjs to emit per-glyph items took three tries: it merges
+  adjacent text objects and even alternate font resources of the same face,
+  and only flushes on a font-name or font-size change or a vertical shift.
+
+**Coverage** (`npm run test:coverage`, `lib/**` minus types and voice):
+**52% of lines** (was 33%). 100% lines: `routing`, `json`, `extract-flags`,
+`openai-compatible`, `analyse-resume`, `redact`, `index`, `quota`,
+`rounds/score`, `rounds/sweep`, `resume/extract`. `queue` 94%, `gemini` 57%.
+Still 0%, deliberately: `lib/data/*` (Supabase queries behind RLS, only
+meaningful with seeded data), the four model-output wrappers
+(`generate-questions`, `score-answer`, `interviewer-turn`, `transcribe` —
+testing non-determinism), `registry.ts` and `supabase/*` (env reads and
+client construction; `proxy.ts`'s fail-closed branch is the one cheap gap
+left, and it is verified end-to-end in the deploy notes).
 
 **Not testable without a human, and not faked:** the microphone and the
 analyser (calibration, echo floor, barge-in firing, the control-case

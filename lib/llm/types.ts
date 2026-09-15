@@ -30,13 +30,23 @@ export interface CompletionResult {
   model: string;
 }
 
+/**
+ * How the backoff ladder should treat a failure.
+ *
+ *   true    walk the whole ladder — a 429 or a 5xx will likely clear.
+ *   "once"  one retry, then fail over — an empty answer with a clean
+ *           finish_reason is a provider hiccup that one more try usually
+ *           fixes, and if it does not, waiting 2/4/8s more will not either.
+ *   false   fail over now — a 400/401/404 is identical four seconds later.
+ */
+export type Retryable = boolean | "once";
+
 export class ProviderError extends Error {
   constructor(
     message: string,
     readonly provider: ProviderId,
     readonly status?: number,
-    /** 429 and 5xx are worth retrying; 400/401/404 are not. */
-    readonly retryable: boolean = false,
+    readonly retryable: Retryable = false,
     readonly retryAfterMs?: number,
   ) {
     super(message);

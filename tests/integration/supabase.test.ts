@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { requireEnv } from "../support/env";
 import type { Database } from "@/lib/supabase/types";
 
@@ -16,8 +16,10 @@ import type { Database } from "@/lib/supabase/types";
  *      their own row. RLS gates rows, not columns; this is what stops a guest
  *      promoting themselves.
  *
- * Each run leaves one anonymous user behind. Clean them up occasionally:
- *   delete from auth.users where is_anonymous and created_at < now() - interval '1 day';
+ * The user is deleted at the end through delete_own_guest() (migration
+ * 20260916000000), which cascades through every table the guest touched.
+ * If that function is missing the suite fails and says which migration to
+ * apply, rather than quietly leaving a row behind on every run.
  */
 
 const GUEST_CAP = 10; // handle_new_user() in 20260905010000_llm_quota.sql
@@ -34,6 +36,23 @@ beforeAll(async () => {
   const { data, error } = await supabase.auth.signInAnonymously();
   if (error || !data.user) throw new Error(`anonymous sign-in failed: ${error?.message}`);
   userId = data.user.id;
+});
+
+afterAll(async () => {
+  if (!userId) return;
+  const { data, error } = await supabase.rpc("delete_own_guest");
+  if (error?.code === "PGRST202") {
+    throw new Error(
+      "delete_own_guest() is missing — apply supabase/migrations/20260916000000_delete_own_guest.sql. " +
+        `The anonymous user ${userId} from this run was left behind.`,
+    );
+  }
+  if (error) throw error;
+  if (data !== true) throw new Error(`delete_own_guest() returned ${String(data)} for ${userId}`);
+
+  // Gone means gone: the session's token no longer identifies anyone.
+  const { data: rows } = await supabase.from("users").select("id").eq("id", userId);
+  expect(rows ?? []).toEqual([]);
 });
 
 async function consume(cost: number) {

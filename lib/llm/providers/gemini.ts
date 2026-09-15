@@ -103,7 +103,9 @@ export function createGeminiProvider(apiKey: string | undefined): LLMProvider {
           `Gemini returned no content (finishReason: ${candidate?.finishReason ?? "unknown"})`,
           "gemini",
           undefined,
-          candidate?.finishReason === "MAX_TOKENS",
+          // Same two shapes as the OpenAI-compatible provider: budget spent
+          // is fully retryable, an otherwise-clean empty answer gets one go.
+          candidate?.finishReason === "MAX_TOKENS" ? true : "once",
         );
       }
 

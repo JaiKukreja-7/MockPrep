@@ -79,14 +79,17 @@ export function createOpenAICompatibleProvider(config: Config): LLMProvider {
       const text = choice?.message?.content ?? "";
 
       if (!text.trim()) {
-        // A reasoning model that spends its whole budget thinking returns an
-        // empty content with finish_reason "length" and HTTP 200. Treat that
-        // as retryable rather than letting an empty string reach the parser.
+        // Never let an empty string reach the parser. Two shapes of empty:
+        //   finish_reason "length" — a reasoning model spent its whole budget
+        //   thinking. Fully retryable; the next attempt often lands.
+        //   anything else — the provider returned a clean 200 with nothing in
+        //   it. Seen intermittently on free tiers. Retry once, then fail
+        //   over: a second empty answer is a provider that is empty today.
         throw new ProviderError(
           `${config.label} returned no content (finish_reason: ${choice?.finish_reason ?? "unknown"})`,
           config.id,
           undefined,
-          choice?.finish_reason === "length",
+          choice?.finish_reason === "length" ? true : "once",
         );
       }
 

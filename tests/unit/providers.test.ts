@@ -69,12 +69,24 @@ describe("OpenAI-compatible provider error classification", () => {
     expect(err.message).toMatch(/returned no content \(finish_reason: length\)/);
   });
 
-  it("a 200 with whitespace-only content is still an error, never an empty string to the parser", async () => {
+  it("a 200 with empty content and a clean finish_reason is retryable once — a hiccup, not a budget problem", async () => {
+    // Why once: free tiers intermittently return a clean 200 with nothing in
+    // it. One more try usually lands, so a hard fail would kill a round for
+    // nothing; but if the second answer is empty too the provider is empty
+    // today, and spending 2/4/8s more on it only delays the failover.
     vi.stubGlobal("fetch", async () =>
       jsonResponse(200, { choices: [{ message: { content: "  \n" }, finish_reason: "stop" }] }),
     );
     const err = await providerError(groq().complete(request));
-    expect(err).toBeInstanceOf(ProviderError);
+    expect(err.retryable).toBe("once");
+    expect(err.message).toMatch(/finish_reason: stop/);
+  });
+
+  it("a 200 with no choices at all is the same once-retryable empty", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse(200, {}));
+    const err = await providerError(groq().complete(request));
+    expect(err.retryable).toBe("once");
+    expect(err.message).toMatch(/finish_reason: unknown/);
   });
 
   it("an unconfigured provider throws without touching the network", async () => {
@@ -111,6 +123,14 @@ describe("Gemini provider", () => {
     );
     const err = await providerError(createGeminiProvider("k").complete(request));
     expect(err.retryable).toBe(true);
+  });
+
+  it("empty content with any other finishReason is retryable once", async () => {
+    vi.stubGlobal("fetch", async () =>
+      jsonResponse(200, { candidates: [{ content: { parts: [{ text: "" }] }, finishReason: "STOP" }] }),
+    );
+    const err = await providerError(createGeminiProvider("k").complete(request));
+    expect(err.retryable).toBe("once");
   });
 
   it("joins text parts and ignores thought-signature parts without text", async () => {

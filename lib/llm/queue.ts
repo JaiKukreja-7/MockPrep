@@ -63,6 +63,11 @@ export async function withBackoff<T>(
   onAttemptFailed?: (attempt: number, error: unknown) => void,
 ): Promise<T> {
   let lastError: unknown;
+  // A "once" failure gets a single retry per call of withBackoff, whatever
+  // else happens around it. Tracked here rather than by attempt number so a
+  // 429 before it still gets the ladder and an empty answer after it does not
+  // get a second go.
+  let onceSpent = false;
 
   for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt += 1) {
     try {
@@ -75,6 +80,10 @@ export async function withBackoff<T>(
         error instanceof ProviderError ? error.retryable : false;
       const isLast = attempt === BACKOFF_MS.length;
       if (!retryable || isLast) break;
+      if (retryable === "once") {
+        if (onceSpent) break;
+        onceSpent = true;
+      }
 
       const base = BACKOFF_MS[attempt];
       const suggested =

@@ -114,7 +114,7 @@ describe("provider failover", () => {
     ]);
   });
 
-  it("treats an empty-content 200 as retryable: the same provider is retried, then answers", async () => {
+  it("an empty 200 with the budget spent is fully retryable: the same provider is retried, then answers", async () => {
     scripts.groq = [
       async () => { throw new ProviderError("Groq returned no content (finish_reason: length)", "groq", undefined, true); },
       ok('{"score":2}'),
@@ -123,6 +123,43 @@ describe("provider failover", () => {
     expect(value.provider).toBe("groq");
     expect(calls.groq).toBe(2);
     expect(sleptMs).toBe(1000);
+  });
+
+  const emptyOnce = async () => {
+    throw new ProviderError("Groq returned no content (finish_reason: stop)", "groq", undefined, "once");
+  };
+
+  it("an otherwise-clean empty 200 is retried exactly once, then the chain moves on", async () => {
+    // Why once and not the ladder: the first empty is a hiccup worth one more
+    // try, so a round is not lost to it; a second empty means the provider is
+    // empty today, and 2/4/8s more of waiting would only delay the failover.
+    scripts.groq = [emptyOnce, emptyOnce, ok("never reached")];
+    scripts.openrouter = [ok('{"score":3}')];
+
+    const { value, sleptMs } = await settle(runTask("answer_scoring", { system: "", user: "" }));
+
+    expect(value.provider).toBe("openrouter");
+    expect(calls.groq).toBe(2); // one try, one retry, no more
+    expect(sleptMs).toBe(1000); // the single retry's step, nothing further
+  });
+
+  it("an empty 200 followed by an answer stays on the same provider", async () => {
+    scripts.groq = [emptyOnce, ok('{"score":4}')];
+    const { value } = await settle(runTask("answer_scoring", { system: "", user: "" }));
+    expect(value.provider).toBe("groq");
+    expect(calls.groq).toBe(2);
+  });
+
+  it("the single empty-retry does not consume the 429 ladder, and the ladder does not restore it", async () => {
+    // 429, 429, empty, 429, empty → the two 429s before it ladder normally,
+    // the empty spends its one retry, the 429 after it still retries, and the
+    // second empty ends the provider's turn.
+    scripts.groq = [fail(429, true), fail(429, true), emptyOnce, fail(429, true), emptyOnce];
+    scripts.openrouter = [ok("fine")];
+    const { value, sleptMs } = await settle(runTask("answer_scoring", { system: "", user: "" }));
+    expect(value.provider).toBe("openrouter");
+    expect(calls.groq).toBe(5);
+    expect(sleptMs).toBe(1000 + 2000 + 4000 + 8000); // four sleeps; the fifth failure ends it
   });
 
   it("skips an unconfigured provider without an attempt and reports it", async () => {
