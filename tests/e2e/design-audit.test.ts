@@ -27,7 +27,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
  */
 
 const WIDTHS = [375, 768, 1440] as const;
-const PUBLIC_ROUTES = ["/", "/sign-in", "/test"];
+const PUBLIC_ROUTES = ["/", "/sign-in", "/test", "/unavailable?from=%2Fdashboard"];
 const GUEST_ROUTES = ["/dashboard", "/sessions", "/reports", "/questions", "/settings", "/resume"];
 
 let browser: Browser;

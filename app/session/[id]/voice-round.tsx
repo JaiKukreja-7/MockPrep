@@ -17,6 +17,8 @@ import {
   stopSpeaking,
 } from "@/lib/voice/stt-tts";
 import { useMicrophone } from "@/lib/voice/use-microphone";
+import { describeSubmitFailure } from "@/lib/client-errors";
+import Link from "next/link";
 import { vlog } from "@/lib/voice/voice-log";
 import type { VoiceSessionHandle } from "@/lib/voice/transport";
 import type { RoundView } from "@/lib/data/session";
@@ -77,6 +79,10 @@ export function VoiceRound({
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [signIn, setSignIn] = useState(false);
+  // The last recording that did not get through. Kept so a dropped
+  // connection or a transcription hiccup costs a click, not a re-take.
+  const [held, setHeld] = useState<{ blob: Blob; durationMs: number } | null>(null);
   const handleRef = useRef<VoiceSessionHandle | null>(null);
   const speakerRef = useRef<SpeakerHandle>(null);
   const spokenForRef = useRef<string | null>(null);
@@ -181,16 +187,11 @@ export function VoiceRound({
     mic.startRecording();
   }, [mic]);
 
-  const send = useCallback(async () => {
-    vlog("turn.send", { roundId: current.id });
-    const captured = await mic.stopRecording();
-    if (!captured) {
-      setError("Nothing was recorded.");
-      return;
-    }
-
+  /** Posts one recording. Shared by the first send and the retry of a held one. */
+  const submit = useCallback(async (captured: { blob: Blob; durationMs: number }) => {
     setSending(true);
     setError(null);
+    setSignIn(false);
     try {
       const handle = handleRef.current ?? (await transport.connect(sessionId));
       const result = await handle.sendUtterance(captured.blob, {
@@ -207,8 +208,18 @@ export function VoiceRound({
         nextQuestionChars: result.nextQuestion?.length ?? 0,
       });
 
+      // It arrived. Whatever happens next, this recording is done with.
+      setHeld(null);
       setRemaining(result.remainingSeconds);
       setAcknowledgement(result.acknowledgement);
+
+      if (result.scoringFailed) {
+        // The turn is saved and the round is over; only the score is missing.
+        // The refresh swaps this component for the scoring affordance.
+        vlog("turn.scoring_failed", {});
+        onTurnComplete();
+        return;
+      }
 
       if (result.acknowledgement) {
         void speak(result.acknowledgement, {
@@ -228,11 +239,33 @@ export function VoiceRound({
       vlog("turn.refresh", {});
       onTurnComplete();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "That turn did not go through.");
+      // Keep the recording, say what happened in a sentence, and offer the
+      // same bytes again. Server sentences pass through; a network failure
+      // or an expired session gets its own.
+      setHeld(captured);
+      const failure = describeSubmitFailure(e, "recording");
+      setError(failure.message);
+      setSignIn(failure.signIn);
     } finally {
       setSending(false);
     }
-  }, [mic, sessionId, current.id, elapsedSeconds, onTurnComplete, router]);
+  }, [sessionId, current.id, elapsedSeconds, onTurnComplete, router]);
+
+  const send = useCallback(async () => {
+    vlog("turn.send", { roundId: current.id });
+    const captured = await mic.stopRecording();
+    if (!captured) {
+      setError("Nothing was recorded.");
+      return;
+    }
+    await submit(captured);
+  }, [mic, current.id, submit]);
+
+  const resend = useCallback(async () => {
+    if (!held) return;
+    vlog("turn.resend", { roundId: current.id, bytes: held.blob.size });
+    await submit(held);
+  }, [held, current.id, submit]);
 
   /** Debug panel: a long utterance, through the same path as a question. */
   const speakTest = useCallback((text: string) => {
@@ -298,12 +331,28 @@ export function VoiceRound({
           ) : null}
 
           <div className="flex flex-wrap items-center gap-6">
-            <Button
-              onClick={() => (recording ? send() : beginRecording())}
-              disabled={mic.state === "requesting" || mic.state === "denied"}
-            >
-              {recording ? "Stop and send" : "Start recording"}
-            </Button>
+            {held ? (
+              <Button onClick={resend}>Send that recording again</Button>
+            ) : (
+              <Button
+                onClick={() => (recording ? send() : beginRecording())}
+                disabled={mic.state === "requesting" || mic.state === "denied"}
+              >
+                {recording ? "Stop and send" : "Start recording"}
+              </Button>
+            )}
+            {held ? (
+              <Button
+                variant="outline"
+                size="compact"
+                onClick={() => {
+                  setHeld(null);
+                  setError(null);
+                }}
+              >
+                Discard it and record again
+              </Button>
+            ) : null}
 
             <p className="flex items-center gap-3 text-u-eyebrow" aria-live="polite">
               {/* Same convention as the speaker at small scale: solid for the
@@ -356,6 +405,14 @@ export function VoiceRound({
       {(error ?? mic.error) ? (
         <p className="text-u-eyebrow text-error" role="alert">
           {error ?? mic.error}
+          {signIn ? (
+            <>
+              {" "}
+              <Link href="/sign-in" target="_blank" rel="noopener" className="font-medium">
+                Sign in in a new tab
+              </Link>
+            </>
+          ) : null}
         </p>
       ) : null}
     </div>

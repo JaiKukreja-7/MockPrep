@@ -101,7 +101,7 @@ export async function getSession(id: string): Promise<SessionView | null> {
 }
 
 export interface ReportView {
-  session: Pick<SessionRow, "id" | "title" | "track" | "started_at" | "duration_seconds">;
+  session: Pick<SessionRow, "id" | "title" | "track" | "status" | "started_at" | "duration_seconds">;
   score: { overall: number; structure: number; specificity: number; pace: number } | null;
   transcript: Array<Pick<TranscriptRow, "id" | "at_seconds" | "speaker" | "body" | "flag">>;
 }
@@ -112,7 +112,7 @@ export async function getReport(id: string): Promise<ReportView | null> {
   const [sessionResult, scoreResult, transcriptResult] = await Promise.all([
     supabase
       .from("sessions")
-      .select("id, title, track, started_at, duration_seconds")
+      .select("id, title, track, status, started_at, duration_seconds")
       .eq("id", id)
       .maybeSingle(),
     supabase

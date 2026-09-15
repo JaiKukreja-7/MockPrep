@@ -73,6 +73,14 @@ export interface VoiceTurnResult {
   remainingSeconds: number;
   /** True when the round is over and scoring has been kicked off. */
   done: boolean;
+  /**
+   * The turn was recorded and the round is over, but scoring failed. The
+   * transport does not throw for this — the recording succeeded — so the
+   * screen can move on to the scoring affordance rather than a retry of the
+   * turn. `error` carries the sentence.
+   */
+  scoringFailed?: boolean;
+  error?: string;
 }
 
 export interface VoiceTurnContext {

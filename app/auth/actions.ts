@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { isSupabaseOutage, OUTAGE_MESSAGE } from "@/lib/supabase/outage";
 
 function safeNext(next: FormDataEntryValue | null): string {
   const value = typeof next === "string" ? next : "";
@@ -39,7 +40,7 @@ export async function signInWithEmail(formData: FormData) {
   });
 
   if (error) {
-    redirect(`/sign-in?error=${encodeURIComponent(error.message)}`);
+    redirect(`/sign-in?error=${encodeURIComponent(isSupabaseOutage(error) ? OUTAGE_MESSAGE : error.message)}`);
   }
 
   redirect(`/sign-in?sent=${encodeURIComponent(email)}`);
@@ -66,7 +67,7 @@ export async function signInWithPassword(formData: FormData) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    redirect(`/sign-in?error=${encodeURIComponent(error.message)}`);
+    redirect(`/sign-in?error=${encodeURIComponent(isSupabaseOutage(error) ? OUTAGE_MESSAGE : error.message)}`);
   }
 
   redirect(next);
@@ -80,7 +81,7 @@ export async function signInAsGuest(formData: FormData) {
   const { error } = await supabase.auth.signInAnonymously();
 
   if (error) {
-    redirect(`/sign-in?error=${encodeURIComponent(error.message)}`);
+    redirect(`/sign-in?error=${encodeURIComponent(isSupabaseOutage(error) ? OUTAGE_MESSAGE : error.message)}`);
   }
 
   redirect(next);

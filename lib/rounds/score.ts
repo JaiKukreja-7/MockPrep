@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { consumeQuota } from "@/lib/llm/quota";
 import { scoreAnswer } from "@/lib/llm/tasks/score-answer";
 import { extractFlags } from "@/lib/llm/tasks/extract-flags";
+import { describeLlmFailure } from "@/lib/llm/user-message";
 
 export interface ScoreOutcome {
   ok: boolean;
@@ -85,7 +86,11 @@ export async function scoreSession(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? `Scoring failed: ${error.message}` : "Scoring failed.",
+      error: describeLlmFailure(
+        error,
+        "Scoring did not go through",
+        "Your answers are saved — score the round again in a minute.",
+      ),
     };
   }
 }

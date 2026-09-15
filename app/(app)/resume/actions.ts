@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { consumeQuota } from "@/lib/llm/quota";
+import { OUTAGE_MESSAGE } from "@/lib/supabase/outage";
+import { currentUser } from "@/lib/supabase/user";
+import { consumeQuota, refundQuota } from "@/lib/llm/quota";
+import { describeLlmFailure } from "@/lib/llm/user-message";
 import { analyseResume } from "@/lib/llm/tasks/analyse-resume";
 import { extractResume, ResumeExtractionError } from "@/lib/resume/extract";
 
@@ -24,9 +27,8 @@ export async function analyseResumeUpload(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, outage } = await currentUser(supabase);
+  if (outage) return { error: OUTAGE_MESSAGE };
   if (!user) return { error: "Sign in to analyse a resume." };
 
   // Uploads need a real account. The restrictive RLS policy on analyses
@@ -44,15 +46,10 @@ export async function analyseResumeUpload(
     };
   }
 
-  const quota = await consumeQuota(1);
-  if (!quota.allowed) {
-    return {
-      error: `Daily limit reached — ${quota.used} of ${quota.cap} used today.`,
-    };
-  }
-
   // Parsed in memory. `text` is never written anywhere: it goes to the
-  // analyser and falls out of scope with this function.
+  // analyser and falls out of scope with this function. Extraction runs
+  // before the quota is charged: a scan that yields nothing costs no
+  // provider call, so it should cost no request either.
   let text: string;
   let kind: "pdf" | "docx";
   try {
@@ -66,15 +63,24 @@ export async function analyseResumeUpload(
     };
   }
 
+  const quota = await consumeQuota(1);
+  if (!quota.allowed) {
+    return {
+      error: `Daily limit reached — ${quota.used} of ${quota.cap} used today.`,
+    };
+  }
+
   let analysis;
   try {
     analysis = await analyseResume({ text, targetRole });
   } catch (error) {
+    await refundQuota(1);
     return {
-      error:
-        error instanceof Error
-          ? `Analysis failed: ${error.message}`
-          : "Analysis failed.",
+      error: describeLlmFailure(
+        error,
+        "Analysis did not go through",
+        "Try again in a minute — you have not been charged.",
+      ),
     };
   }
 
@@ -100,6 +106,7 @@ export async function analyseResumeUpload(
     .single();
 
   if (writeError || !row) {
+    await refundQuota(1);
     return { error: writeError?.message ?? "Could not save the analysis." };
   }
 

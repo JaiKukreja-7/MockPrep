@@ -8,6 +8,15 @@ variable at build time, so the same image serves any project. `/` is forced
 dynamic for the same reason — with no env at build time Next would otherwise
 prerender it and skip the signed-in redirect.
 
+**A local `next build` is not the production shape.** Next inlines every
+`NEXT_PUBLIC_*` variable it can see at build time, and a build run in this
+checkout sees `.env.local`, so the server bundle it produces carries those
+values and ignores the runtime environment. The Docker build never sees a
+`.env*` file (`.dockerignore`), which is why the image reads them at start-up.
+Found while trying to point a local build at a dead Supabase: it kept talking
+to the real one. To test anything that depends on the runtime environment,
+build from a copy of the tree with no `.env.local` in it.
+
 Nothing below needs the `gcloud` CLI. `scripts/gcp-setup.sh` and
 `scripts/deploy.sh` do the same from a terminal that has the SDK, if one
 ever exists; `scripts/verify-deploy.sh` is plain curl and works anywhere.

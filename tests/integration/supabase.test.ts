@@ -137,3 +137,24 @@ describe("guest column grants on public.users", () => {
     });
   });
 });
+
+describe("refund_llm_quota", () => {
+  it("gives back a charged request, floored at zero, and needs its migration", async () => {
+    // This block runs after the quota suite above has spent the guest's 10.
+    const { data, error } = await supabase.rpc("refund_llm_quota", { p_cost: 1 });
+    if (error?.code === "PGRST202") {
+      throw new Error(
+        "refund_llm_quota() is missing — apply supabase/migrations/20260916010000_refund_llm_quota.sql.",
+      );
+    }
+    expect(error).toBeNull();
+    const row = Array.isArray(data) ? data[0] : data;
+    expect(row).toEqual({ used: GUEST_CAP - 1, cap: GUEST_CAP });
+
+    // The refunded unit can be spent again…
+    expect((await consume(1)).allowed).toBe(true);
+    // …and a refund never goes below zero.
+    const { data: floor } = await supabase.rpc("refund_llm_quota", { p_cost: 999 });
+    expect((Array.isArray(floor) ? floor[0] : floor)?.used).toBe(0);
+  });
+});

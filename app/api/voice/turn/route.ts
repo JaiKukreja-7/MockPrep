@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { OUTAGE_MESSAGE } from "@/lib/supabase/outage";
+import { currentUser } from "@/lib/supabase/user";
+import { describeLlmFailure } from "@/lib/llm/user-message";
 import { transcribe } from "@/lib/llm/tasks/transcribe";
 import { interviewerTurn } from "@/lib/llm/tasks/interviewer-turn";
 import { scoreSession } from "@/lib/rounds/score";
@@ -13,9 +16,10 @@ const MAX_ROUND_MS = 10 * 60 * 1000;
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, outage } = await currentUser(supabase);
+  if (outage) {
+    return NextResponse.json({ error: OUTAGE_MESSAGE }, { status: 503 });
+  }
   if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
@@ -77,8 +81,9 @@ export async function POST(request: NextRequest) {
       nextQuestion: null,
       remainingSeconds: 0,
       done: outcome.ok,
+      scoringFailed: !outcome.ok,
       error: outcome.ok ? undefined : outcome.error,
-    } satisfies VoiceTurnResult & { error?: string });
+    } satisfies VoiceTurnResult);
   }
 
   /* ---------------------------------------------------------------- STT */
@@ -87,12 +92,15 @@ export async function POST(request: NextRequest) {
   try {
     ({ text, durationMs } = await transcribe(audio));
   } catch (error) {
+    // The Whisper error body is a JSON blob; it goes to the log, and the
+    // screen gets a sentence. The recording is still on the client.
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? `Could not transcribe that: ${error.message}`
-            : "Could not transcribe that.",
+        error: describeLlmFailure(
+          error,
+          "Could not transcribe that",
+          "The recording is still here — send it again in a moment.",
+        ),
       },
       { status: 502 },
     );
@@ -195,8 +203,9 @@ export async function POST(request: NextRequest) {
       nextQuestion: null,
       remainingSeconds,
       done: outcome.ok,
+      scoringFailed: !outcome.ok,
       error: outcome.ok ? undefined : outcome.error,
-    } satisfies VoiceTurnResult & { error?: string });
+    } satisfies VoiceTurnResult);
   }
 
   return NextResponse.json({

@@ -54,6 +54,24 @@ export async function consumeQuota(cost = 1): Promise<QuotaResult> {
   return { allowed: row.allowed, used: row.used, cap: row.cap };
 }
 
+/**
+ * Gives back what consumeQuota took, for a round that was charged and then
+ * never created — the providers all failed, or the insert did. Floors at
+ * zero in SQL. A missing function is logged, never thrown: the caller is
+ * already on an error path, and failing to refund must not hide why.
+ */
+export async function refundQuota(cost = 1): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("refund_llm_quota", { p_cost: cost });
+  if (error) {
+    console.error(
+      error.code === FUNCTION_MISSING
+        ? "[mockprep] refund_llm_quota is missing — apply supabase/migrations/20260916010000_refund_llm_quota.sql. A failed round was charged."
+        : `[mockprep] refund_llm_quota failed: ${error.message}`,
+    );
+  }
+}
+
 export class QuotaExceededError extends Error {
   constructor(readonly used: number, readonly cap: number) {
     super(

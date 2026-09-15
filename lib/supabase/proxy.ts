@@ -1,10 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { hasSupabaseEnv, supabaseAnonKey, supabaseUrl } from "./env";
+import { isSupabaseOutage, OUTAGE_MESSAGE } from "./outage";
 import type { Database } from "./types";
 
 /** Routes reachable without a session. Everything else redirects to /sign-in. */
-const PUBLIC_PATHS = ["/", "/sign-in", "/auth", "/test"];
+const PUBLIC_PATHS = ["/", "/sign-in", "/auth", "/test", "/unavailable"];
+
+/** Set on every response served during an outage, so it can be seen from outside. */
+export const OUTAGE_HEADER = "x-mockprep-outage";
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some(
@@ -72,7 +76,40 @@ export async function updateSession(request: NextRequest) {
   // than trusting a cookie the client could have written.
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
+
+  // "Could not ask" is not "no". When Supabase itself is unreachable, a
+  // signed-in person must not be bounced to sign-in as if their session had
+  // ended; they get told what is actually wrong, and so does the log.
+  if (isSupabaseOutage(error)) {
+    console.error(
+      `[mockprep] Supabase unreachable while checking the session for ${request.method} ` +
+        `${request.nextUrl.pathname}: ${error?.message ?? "unknown error"}`,
+    );
+    const pathname = request.nextUrl.pathname;
+    if (isPublic(pathname)) {
+      response.headers.set(OUTAGE_HEADER, "1");
+      return response;
+    }
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { error: OUTAGE_MESSAGE },
+        { status: 503, headers: { [OUTAGE_HEADER]: "1" } },
+      );
+    }
+    // A server action in flight: let it through. The action asks the same
+    // question, gets the same answer, and returns the sentence into the form
+    // it came from — where the person's typed answer still is.
+    if (request.method === "POST" && request.headers.get("next-action")) {
+      response.headers.set(OUTAGE_HEADER, "1");
+      return response;
+    }
+    const url = request.nextUrl.clone();
+    url.pathname = "/unavailable";
+    url.search = `?from=${encodeURIComponent(pathname)}`;
+    return NextResponse.rewrite(url, { headers: { [OUTAGE_HEADER]: "1" } });
+  }
 
   if (!user && !isPublic(request.nextUrl.pathname)) {
     // API callers get a status they can branch on. Redirecting them to the

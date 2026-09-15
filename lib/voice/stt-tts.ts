@@ -45,10 +45,20 @@ export function createSttTtsTransport(): VoiceTransport {
             body: form,
           });
 
-          const body = (await response.json()) as VoiceTurnResult & {
-            error?: string;
-          };
-          if (!response.ok || body.error) {
+          // A non-JSON body means the request never reached the route — the
+          // proxy answered, or a captive portal did. Say so rather than
+          // throwing a JSON parse error at the person.
+          const body = (await response.json().catch(() => null)) as
+            | (VoiceTurnResult & { error?: string })
+            | null;
+          if (!body) {
+            throw new Error(
+              response.status === 401 || response.status === 403
+                ? "Not signed in."
+                : `The server did not answer properly (${response.status}).`,
+            );
+          }
+          if (!response.ok || (body.error && !body.scoringFailed)) {
             throw new Error(body.error ?? `Turn failed (${response.status})`);
           }
           return body;

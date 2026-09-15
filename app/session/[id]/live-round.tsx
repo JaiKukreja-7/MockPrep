@@ -2,10 +2,18 @@
 
 import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { submitAnswer, type ActionState } from "@/app/rounds/actions";
+import { describeSubmitFailure } from "@/lib/client-errors";
 import type { SessionView } from "@/lib/data/session";
+import { ScoreRetry } from "./score-retry";
 import { VoiceRound } from "./voice-round";
+
+interface SubmitState extends ActionState {
+  /** The failure needs a fresh session; show the sign-in link. */
+  signIn?: boolean;
+}
 
 function formatClock(total: number) {
   const m = Math.floor(total / 60);
@@ -20,11 +28,24 @@ export function LiveRound({ view }: { view: SessionView }) {
   const isVoice = current?.mode === "voice";
   const [running, setRunning] = useState(true);
   const [elapsed, setElapsed] = useState(view.elapsedSeconds);
-  const [state, formAction, pending] = useActionState<ActionState, FormData>(
-    submitAnswer,
+  // The action call is wrapped so a request that never arrives — the network
+  // dropped, the session expired and the proxy redirected the POST — comes
+  // back as a sentence in this form rather than an exception that unmounts
+  // it. The typed answer is React state, not an uncontrolled field, for the
+  // same reason: it must survive the failure.
+  const [state, formAction, pending] = useActionState<SubmitState, FormData>(
+    async (prev, formData) => {
+      try {
+        return await submitAnswer(prev, formData);
+      } catch (error) {
+        const failure = describeSubmitFailure(error, "answer");
+        return { error: failure.message, signIn: failure.signIn };
+      }
+    },
     {},
   );
-  const answerRef = useRef<HTMLTextAreaElement>(null);
+  const [answer, setAnswer] = useState("");
+  const answeredRef = useRef(current?.id);
 
   useEffect(() => {
     if (!running || pending) return;
@@ -32,10 +53,12 @@ export function LiveRound({ view }: { view: SessionView }) {
     return () => clearInterval(id);
   }, [running, pending]);
 
-  // A new question means the previous answer submitted; clear the box.
-  useEffect(() => {
-    if (!pending && answerRef.current) answerRef.current.value = "";
-  }, [current?.id, pending]);
+  // A new question means the previous answer submitted; clear the box. On a
+  // failure the question is the same one, so the answer stays.
+  if (answeredRef.current !== current?.id) {
+    answeredRef.current = current?.id;
+    if (answer) setAnswer("");
+  }
 
   const clock = formatClock(elapsed);
   const answered = rounds.filter((r) => r.answered).length;
@@ -88,10 +111,12 @@ export function LiveRound({ view }: { view: SessionView }) {
       <main className="flex flex-1 flex-col">
         <section className="px-8 pt-12 pb-10">
           <p className="eyebrow">
-            Question {Math.min(answered + 1, rounds.length)} of {rounds.length}
+            {current
+              ? `Question ${Math.min(answered + 1, rounds.length)} of ${rounds.length}`
+              : "Round complete"}
           </p>
           <h1 className="display text-u-display mt-4 max-w-4xl">
-            {current?.question ?? "That is the last question."}
+            {current?.question ?? "Every question is answered."}
           </h1>
         </section>
 
@@ -113,6 +138,11 @@ export function LiveRound({ view }: { view: SessionView }) {
               />
               The interviewer is thinking…
             </p>
+          ) : !current && rounds.length > 0 ? (
+            /* Every round answered, session still live: the last submit's
+               scoring did not go through. The answers are saved; this is the
+               way to the score. Never a blank end. */
+            <ScoreRetry sessionId={session.id} why={state.error} />
           ) : current ? (
             <form action={formAction} className="flex max-w-4xl flex-col gap-6">
               <input type="hidden" name="sessionId" value={session.id} />
@@ -123,10 +153,11 @@ export function LiveRound({ view }: { view: SessionView }) {
               <label className="flex flex-col gap-2">
                 <span className="eyebrow">Your answer</span>
                 <textarea
-                  ref={answerRef}
                   name="answer"
                   rows={6}
                   required
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
                   className="input h-auto rounded-surface py-4 leading-normal"
                   placeholder="Talk through it the way you would out loud."
                 />
@@ -135,6 +166,14 @@ export function LiveRound({ view }: { view: SessionView }) {
               {state.error ? (
                 <p className="text-u-eyebrow text-error" role="alert">
                   {state.error}
+                  {state.signIn ? (
+                    <>
+                      {" "}
+                      <Link href="/sign-in" target="_blank" rel="noopener" className="font-medium">
+                        Sign in in a new tab
+                      </Link>
+                    </>
+                  ) : null}
                 </p>
               ) : null}
 

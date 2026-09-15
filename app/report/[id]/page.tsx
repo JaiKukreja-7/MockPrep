@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { getReport } from "@/lib/data/session";
+import { ScoreRetry } from "@/app/session/[id]/score-retry";
 
 export const metadata = { title: "Scored report — MockPrep" };
 
@@ -108,8 +109,26 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                 ))}
               </ul>
             </>
+          ) : session.status === "abandoned" ? (
+            <div className="mt-4 flex flex-col gap-6">
+              <p className="text-u-lg">This round timed out before it was scored.</p>
+              <p className="text-u-body max-w-md">
+                It sat open for an hour and was closed. The transcript is kept
+                below; the score cannot be made now.
+              </p>
+              <div>
+                <Link href="/dashboard">
+                  <Button>Start a new round</Button>
+                </Link>
+              </div>
+            </div>
           ) : (
-            <p className="mt-4 text-u-lg">This round has not been scored yet.</p>
+            /* Live, unscored: every answer is in but the scorer was not
+               reached. The same affordance as the session screen. */
+            <div className="mt-4 flex flex-col gap-6">
+              <p className="text-u-lg">This round has not been scored yet.</p>
+              <ScoreRetry sessionId={session.id} />
+            </div>
           )}
         </section>
 

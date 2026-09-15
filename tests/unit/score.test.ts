@@ -13,7 +13,10 @@ vi.mock("@/lib/supabase/server", () => ({
     return recorded.client;
   },
 }));
-vi.mock("@/lib/llm/quota", () => ({ consumeQuota: (...a: unknown[]) => consumeQuota(...a) }));
+vi.mock("@/lib/llm/quota", () => ({
+  consumeQuota: (...a: unknown[]) => consumeQuota(...a),
+  QuotaExceededError: class extends Error {},
+}));
 vi.mock("@/lib/llm/tasks/score-answer", () => ({ scoreAnswer: (...a: unknown[]) => scoreAnswer(...a) }));
 vi.mock("@/lib/llm/tasks/extract-flags", () => ({ extractFlags: (...a: unknown[]) => extractFlags(...a) }));
 
@@ -81,12 +84,14 @@ describe("scoreSession", () => {
     expect(called(close!, "eq", "id", "s1")).toBe(true);
   });
 
-  it("reports a model failure without writing a score", async () => {
+  it("reports a model failure as one sentence without writing a score", async () => {
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
     scoreAnswer.mockRejectedValue(new Error("Every provider for \"answer_scoring\" failed"));
     expect(await scoreSession("s1", 90)).toEqual({
       ok: false,
-      error: 'Scoring failed: Every provider for "answer_scoring" failed',
+      error: "Scoring did not go through. Your answers are saved — score the round again in a minute.",
     });
+    warn.mockRestore();
     expect(recorded.ops.some((o) => o.table === "scores")).toBe(false);
     expect(recorded.ops.some((o) => o.table === "sessions")).toBe(false);
   });

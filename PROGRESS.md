@@ -248,6 +248,53 @@ it loads cleanly with Groq as the only leg.
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
 
+### Error-state audit and fixes (step 14, 2026-09-16)
+
+Eight failure paths, exercised rather than reasoned about — the server ones
+with providers mocked, the browser ones in Chrome against a production build
+(two of those against an env-free build; see the inlining note in
+DEPLOY.md). What each showed, and what it shows now:
+
+| Failure | Was | Now |
+|---|---|---|
+| Every provider 429 at start | six-line attempt log under the form; quota charged | one sentence: "…you have not been charged a round"; `refund_llm_quota` |
+| Every provider 429 at scoring | attempt log; **dead end** on reload ("That is the last question.", no controls); a second Submit **inserted the transcript again** | `submitAnswer` idempotent on an answered round; one sentence; the page revalidates into the **Score this round** affordance |
+| Cap hit at the last answer | same dead end | same affordance; the sentence names the cap |
+| Whisper empty | good | unchanged |
+| Whisper down | Groq's JSON blob on screen; recording gone | one sentence, blob in the log; **recording kept**, "Send that recording again" |
+| Scan-only resume | fine, but quota charged first | extraction before the charge |
+| Analysis fails | attempt log | one sentence; refunded |
+| Network loss, text submit | Next's "This page couldn't load"; **answer lost** | sentence in the form; answer kept (controlled field, wrapped action) |
+| Network loss, voice submit | "Failed to fetch"; recording gone | sentence; recording kept and resendable |
+| Session expired, submit | "This page couldn't load"; answer lost | sentence, sign-in link (new tab), answer kept |
+| Supabase unreachable | private routes **silently bounced to sign-in**, signed-in or not; "fetch failed" on sign-in; nothing logged | proxy tells "could not check" from "no session": `/unavailable` page with a way back, JSON 503 on the API, actions answer with the sentence, server log line, `x-mockprep-outage` header; sign-in says the sentence |
+| Any unhandled error | Next default page, bare Reload | `app/error.tsx` in the empty-state idiom: back into the round / try again, back to the dashboard, digest shown |
+
+New pieces: `lib/supabase/outage.ts` (`isSupabaseOutage`, `OUTAGE_MESSAGE`),
+`lib/supabase/user.ts` (`currentUser` → `{user, outage}`),
+`lib/llm/user-message.ts` (`describeLlmFailure`: one sentence up, the
+attempt log to `console.error`), `lib/client-errors.ts`
+(`describeSubmitFailure`: browser wording for network loss, Next's wording
+for a proxied action, the 401 — each promising the work is still there),
+`app/rounds/actions.ts` `scoreRound`, `app/session/[id]/score-retry.tsx`
+(used on the session screen and the unscored report), `app/error.tsx`,
+`app/unavailable/page.tsx`, `VoiceTurnResult.scoringFailed` (the transport
+returns instead of throwing, so the turn is not re-sent).
+
+**Two migrations to apply**, both loud in the integration suite until then:
+`20260916000000_delete_own_guest.sql` (step 13) and
+`20260916010000_refund_llm_quota.sql` (this step — floors at zero, same
+row as the charge).
+
+*Tested*: 53 new unit tests (`error-paths`, `proxy`, `client-errors`,
+`voice-transport`, `error-screens` — the last renders `error.tsx`, the
+all-answered session, the unscored and abandoned reports and `/unavailable`
+to markup) and two e2e tests that start a real round as a guest and prove
+the answer survives a dropped connection and an expired session in Chrome.
+The design audit now covers `/unavailable`. Not assertable without a
+microphone: the kept-recording flow's click path (the mapping and the
+transport are unit-tested; the button is code).
+
 ### Automated tests (step 13, 2026-09-16)
 
 Vitest 5, three projects in `vitest.config.mts`, each with a different cost:
@@ -788,22 +835,26 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Go live.** Follow `DEPLOY.md` — the console path, click by click: a
+1. **Apply two migrations** in the Supabase SQL editor:
+   `supabase/migrations/20260916000000_delete_own_guest.sql` and
+   `supabase/migrations/20260916010000_refund_llm_quota.sql`. The
+   integration project is red until both are in.
+2. **Go live.** Follow `DEPLOY.md` — the console path, click by click: a
    GitHub-connected Cloud Run service (repo `JaiKukreja-7/MockPrep`, branch
    `^main$`, build type Dockerfile) with the five values referenced from
    Secret Manager on the Variables & Secrets tab. No SDK: this machine has
    1.3 GB free and cannot take it. Then add the service URL to Supabase →
    Authentication → URL Configuration, run `scripts/verify-deploy.sh <url>`
    (plain curl), and one signed-in round to see the cap count on Settings.
-2. **Close the barge-in item before deploy** — see Blocked #2. Still open;
+3. **Close the barge-in item before deploy** — see Blocked #2. Still open;
    the deploy above ships the parked detector as is.
-3. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
+4. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
    true speech-to-speech.
-4. **Timezone.** Dates render in the server's timezone. Fine while server-only;
+5. **Timezone.** Dates render in the server's timezone. Fine while server-only;
    needs a per-user timezone before any of it reaches a client.
-5. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the
+6. **Regenerate `lib/supabase/types.ts`** from `supabase gen types` once the
    schema settles, and keep it in CI.
-6. **Queue is per-instance.** `CONCURRENCY = 2` is process-local; a
+7. **Queue is per-instance.** `CONCURRENCY = 2` is process-local; a
    multi-instance deploy needs Redis or provider-side quota.
 
 ---

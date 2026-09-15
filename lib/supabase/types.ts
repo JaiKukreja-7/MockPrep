@@ -234,6 +234,10 @@ export interface Database {
         Args: { p_seconds: number };
         Returns: { allowed: boolean; granted: number; used: number; cap: number }[];
       };
+      refund_llm_quota: {
+        Args: { p_cost?: number };
+        Returns: { used: number; cap: number }[];
+      };
       /** True if the caller was an anonymous user and is now gone. */
       delete_own_guest: {
         Args: Record<string, never>;
