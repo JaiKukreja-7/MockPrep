@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isSpeaking, msSinceSpeechStart, stopSpeaking } from "./stt-tts";
 import { vlog } from "./voice-log";
+import {
+  EMPTY_SNAPSHOT,
+  getTuning,
+  publishSnapshot,
+  takeRecalibrationRequest,
+  thresholdsFor,
+} from "./barge-in-tuning";
 
 export type MicState =
   | "idle"
@@ -28,33 +35,15 @@ export type MicState =
 
 /** Idle floor is measured over this long after arming, before anything speaks. */
 const CALIBRATION_MS = 2000;
-/**
- * Speech has to clear the room's own p95 by this much.
- *
- * Deliberately not higher: modelled against the captured trace, a 2.2x idle
- * multiplier with a noisy room (p95 0.19) put the speaking bar at 0.63 RMS,
- * which is above ordinary talking — barge-in would have gone from twitchy to
- * deaf. At 1.8 the bar still sits 2.6-4.9x above the observed false fires.
- */
-const IDLE_MULTIPLIER = 1.8;
-/** A floor so low it must be a near-silent room; guards against over-eager firing. */
-const MIN_THRESHOLD = 0.08;
-/** While the interviewer talks, the bar rises: interrupting is a deliberate act. */
-const SPEAKING_BOOST = 1.35;
-/** …and it must also clear the measured echo, not just the idle floor. */
-const ECHO_MULTIPLIER = 1.8;
-/**
- * No barge-in in the first moments of a chunk. The onset is the loudest part
- * of the echo, and two of three false fires in the captured trace landed
- * inside 400ms of a chunk starting.
- */
-const GUARD_MS = 700;
 /** Decision window. Sustained speech, not a spike. */
 const WINDOW_MS = 600;
-/** Share of the window that must be over threshold. */
-const WINDOW_RATIO = 0.6;
 /** Never decide on a handful of samples. */
 const MIN_WINDOW_FRAMES = 15;
+/*
+   The four values that have been re-guessed most — the idle and echo
+   multipliers, the guard, the window ratio — live in ./barge-in-tuning with
+   their rationale, and are read by the tick every frame rather than fixed
+   here, so the debug panel can move them while a question is playing. */
 
 /** In order of preference. Whisper accepts all three. */
 const RECORDER_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
@@ -106,6 +95,7 @@ export function useMicrophone(): UseMicrophone {
     streamRef.current = null;
     recorderRef.current = null;
     setLevel(0);
+    publishSnapshot(EMPTY_SNAPSHOT);
   }, []);
 
   useEffect(() => teardown, [teardown]);
@@ -165,13 +155,17 @@ export function useMicrophone(): UseMicrophone {
     let smoothed = 0;
 
     /* ---- calibration state ---- */
-    const armedAt = performance.now();
-    const idleSamples: number[] = [];
-    let idleThreshold = MIN_THRESHOLD;
+    let armedAt = performance.now();
+    let idleSamples: number[] = [];
+    let floorP95 = 0;
     let calibrated = false;
 
     /* ---- echo state: what the mic hears of our own voice ---- */
-    const echoSamples: number[] = [];
+    let echoSamples: number[] = [];
+
+    /* ---- control-case and fire timestamps, for the panel ---- */
+    let speechDetectedAt = 0;
+    let firedAt = 0;
 
     /* ---- rolling decision window ---- */
     let windowFrames: Array<{ t: number; over: boolean }> = [];
@@ -192,34 +186,43 @@ export function useMicrophone(): UseMicrophone {
       const rms = Math.sqrt(sum / buffer.length);
       const synthTalking = isSpeaking();
       const now = performance.now();
+      const tuning = getTuning();
 
       smoothed = smoothed * 0.8 + rms * 0.2;
       setLevel(Math.min(1, smoothed * 6));
 
       /* ---------------------------------------------------- calibration */
+      if (takeRecalibrationRequest()) {
+        armedAt = now;
+        idleSamples = [];
+        echoSamples = [];
+        floorP95 = 0;
+        calibrated = false;
+        windowFrames = [];
+        vlog("mic.recalibrate", {});
+      }
       if (!calibrated) {
         // Only quiet frames count: a question playing during calibration
         // would bake the echo into the "room" floor.
         if (!synthTalking) idleSamples.push(rms);
         if (now - armedAt >= CALIBRATION_MS) {
-          const floor = percentile(idleSamples, 0.95);
-          idleThreshold = Math.max(MIN_THRESHOLD, floor * IDLE_MULTIPLIER);
+          floorP95 = percentile(idleSamples, 0.95);
           calibrated = true;
+          const t = thresholdsFor(floorP95, 0, tuning);
           vlog("mic.calibrated", {
             samples: idleSamples.length,
             floorP50: percentile(idleSamples, 0.5),
-            floorP95: floor,
-            idleThreshold,
-            speakingThresholdBase: idleThreshold * SPEAKING_BOOST,
+            floorP95,
+            idleThreshold: t.idle,
+            speakingThresholdBase: t.speaking,
           });
         }
       }
-
       /* ------------------------------------------------------ echo floor
          Sampled only inside the guard window, where we know any level is
          our own output rather than an interruption. */
       const sinceChunkStart = msSinceSpeechStart();
-      const inGuard = synthTalking && sinceChunkStart < GUARD_MS;
+      const inGuard = synthTalking && sinceChunkStart < tuning.guardMs;
       if (inGuard) {
         echoSamples.push(rms);
         if (echoSamples.length > 400) echoSamples.shift();
@@ -227,9 +230,14 @@ export function useMicrophone(): UseMicrophone {
       const echoFloor =
         echoSamples.length >= 15 ? percentile(echoSamples, 0.95) : 0;
 
-      const threshold = synthTalking
-        ? Math.max(idleThreshold * SPEAKING_BOOST, echoFloor * ECHO_MULTIPLIER)
-        : idleThreshold;
+      // Derived every frame, not once at calibration, so a multiplier moved
+      // in the panel changes the bar on the next frame.
+      const { idle: idleThreshold, speaking: speakingThreshold } = thresholdsFor(
+        floorP95,
+        echoFloor,
+        tuning,
+      );
+      const threshold = synthTalking ? speakingThreshold : idleThreshold;
 
       /* -------------------------------------------------- rolling window */
       windowFrames.push({ t: now, over: rms > threshold });
@@ -240,7 +248,7 @@ export function useMicrophone(): UseMicrophone {
       const ratio =
         windowFrames.length > 0 ? overCount / windowFrames.length : 0;
       const sustained =
-        windowFrames.length >= MIN_WINDOW_FRAMES && ratio >= WINDOW_RATIO;
+        windowFrames.length >= MIN_WINDOW_FRAMES && ratio >= tuning.windowRatio;
 
       /* -------------------------------------------------------- reporting */
       reportPeak = Math.max(reportPeak, rms);
@@ -270,7 +278,8 @@ export function useMicrophone(): UseMicrophone {
          case: it is the evidence that the bar is reachable by a real voice.
          If a trace shows questions no longer cut off but never shows
          speech.detected either, the threshold has gone from twitchy to deaf
-         and IDLE_MULTIPLIER wants lowering. */
+         and idleMultiplier wants lowering. */
+      if (!synthTalking && sustained && calibrated) speechDetectedAt = now;
       if (!synthTalking && sustained && calibrated && now - lastSpeechLog > 1000) {
         lastSpeechLog = now;
         vlog("speech.detected", {
@@ -289,7 +298,7 @@ export function useMicrophone(): UseMicrophone {
             vlog("bargein.suppressed", {
               reason: "guard window",
               msSinceChunkStart: Math.round(sinceChunkStart),
-              guardMs: GUARD_MS,
+              guardMs: tuning.guardMs,
               rms,
               threshold,
               ratio,
@@ -305,6 +314,7 @@ export function useMicrophone(): UseMicrophone {
             windowFrames: windowFrames.length,
             msSinceChunkStart: Math.round(sinceChunkStart),
           });
+          firedAt = now;
           stopSpeaking();
           setBargedIn(true);
           setTimeout(() => setBargedIn(false), 1500);
@@ -312,6 +322,31 @@ export function useMicrophone(): UseMicrophone {
           windowFrames = [];
         }
       }
+
+      /* ---------------------------------------------------------- publish
+         Every number the decision rested on, for the debug panel. */
+      publishSnapshot({
+        at: now,
+        live: true,
+        rms,
+        smoothed,
+        calibrated,
+        calibrationMsLeft: calibrated ? 0 : Math.max(0, CALIBRATION_MS - (now - armedAt)),
+        floorP95,
+        idleThreshold,
+        echoFloor,
+        echoSamples: echoSamples.length,
+        speakingThreshold,
+        threshold,
+        synthSpeaking: synthTalking,
+        inGuard,
+        msSinceChunkStart: synthTalking ? sinceChunkStart : 0,
+        windowRatio: ratio,
+        windowFrames: windowFrames.length,
+        sustained,
+        speechDetectedAt,
+        firedAt,
+      });
 
       rafRef.current = requestAnimationFrame(tick);
     };

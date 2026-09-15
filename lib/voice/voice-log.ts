@@ -25,6 +25,24 @@ const MAX_ENTRIES = 1000;
 const entries: VoiceLogEntry[] = [];
 let origin = 0;
 let installed = false;
+const listeners = new Set<() => void>();
+
+/** Notified after every entry, and on clear. The debug panel hangs off this. */
+export function onVoiceLog(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/** Read access for the panel — the same array __voiceLog.entries points at. */
+export function voiceLogEntries(): readonly VoiceLogEntry[] {
+  return entries;
+}
+
+export function clearVoiceLog(): void {
+  entries.length = 0;
+  origin = 0;
+  for (const fn of listeners) fn();
+}
 
 /** Live console output is dev-only; the buffer always collects. */
 const LIVE = process.env.NODE_ENV !== "production";
@@ -37,6 +55,7 @@ export function vlog(kind: string, detail: Record<string, unknown> = {}) {
 
   entries.push({ t, kind, detail });
   if (entries.length > MAX_ENTRIES) entries.shift();
+  for (const fn of listeners) fn();
 
   if (LIVE) {
     const stamp = String(t).padStart(6, " ");
@@ -136,8 +155,7 @@ function install() {
         return text;
       },
       clear: () => {
-        entries.length = 0;
-        origin = 0;
+        clearVoiceLog();
         console.log("%cvoice log cleared", "color:#FF3454");
       },
     },

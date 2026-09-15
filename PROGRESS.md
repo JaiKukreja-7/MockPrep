@@ -3,7 +3,7 @@
 AI mock interview platform. Next.js 16 (App Router, Turbopack) + Tailwind v4 +
 Supabase. Free-tier LLMs only.
 
-**Read this file first.** Last updated 2026-09-11.
+**Read this file first.** Last updated 2026-09-16.
 
 ---
 
@@ -247,6 +247,56 @@ it loads cleanly with Groq as the only leg.
 `serverExternalPackages: ["pdfjs-dist", "mammoth"]` is load-bearing: bundled
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
+
+### Barge-in debug panel (step 12, 2026-09-16)
+
+Two console traces produced three wrong diagnoses because the numbers the
+decision rests on were locals inside the analyser tick, read after the fact.
+Now the tick reads its tunables from `lib/voice/barge-in-tuning.ts` every
+frame and publishes a snapshot there every frame, and
+`app/session/[id]/voice-debug-panel.tsx` is a fixed overlay over that data —
+monospace, dark, inline styles, deliberately outside the design system.
+
+On the voice session screen behind `?debug=1`, dev only:
+- RMS as number and bar with the current threshold as a red marker; the
+  idle floor p95 and the idle threshold; the echo floor (with its sample
+  count) and the speaking threshold; calibration state with ms left.
+- `synthSpeaking`, whether the frame is inside the guard window and how far
+  into the chunk it is, and the rolling window's fill against the trigger.
+- Counters from the `__voiceLog` buffer: fires, suppressions, chunks done,
+  chunks cut. The last five non-noise events, newest first (`mic.level` and
+  `chunk.boundary` are filtered; the console still has them).
+- Sliders for the idle and echo multipliers, the guard, and the window
+  ratio. Live: `getTuning()` is read in the tick, and the thresholds are
+  derived per frame rather than once at calibration, so a slider moves the
+  bar on the next frame while a question plays. The resulting thresholds
+  show beside each slider. `defaults` resets.
+- Two buttons: a ~40 s test utterance through the real `speak()` path, and
+  reset calibration (the tick sees `takeRecalibrationRequest()` and drops its
+  idle and echo samples).
+- **The control case, large:** the top block lights lime with "SPEECH
+  DETECTED — nothing playing" when sustained speech clears the idle bar
+  while nothing is playing, and red with "BARGE-IN FIRED" on a fire. If you
+  talk and it never lights, the detector is deaf.
+
+`__voiceLog` is untouched apart from a subscribe hook; the panel is a faster
+surface over the same buffer, and `MIN_THRESHOLD` / `SPEAKING_BOOST` moved
+into the tuning module so the panel's preview and the tick's decision are
+one formula (`thresholdsFor`).
+
+*Guarded*: `voice-round.tsx` gates on `process.env.NODE_ENV !== "production"`
+before the flag, and the panel's import is inside that branch via
+`next/dynamic`. Verified on a production build: zero client or server chunks
+contain the panel's code or strings (the test utterance text lives in the
+panel module for that reason); the voice round and the tuning store are
+present as they should be. *Verified* in a throwaway harness (scratch mirror,
+not in the repo — a page feeding synthetic snapshots and log entries): every
+section renders, sliders update the store and the computed thresholds match
+the formula exactly (idle 0.06 × 3 = 0.180; speaking max(0.180 × 1.35,
+0.09 × 2.5) = 0.243), the test button routes through `speakTest`, `defaults`
+restores 1.8 / 1.8 / 700 / 0.6, and counters and events derive from the log.
+The mic-live behaviour (calibration, echo floor, the indicator) needs a real
+browser with a microphone.
 
 ### Cloud Run deploy — prepared and verified locally, not yet live (step 11, 2026-09-11)
 
@@ -604,6 +654,10 @@ once while nothing is playing, and check for `speech.detected` in
 
 The Browser pane used for automated checks blocks `getUserMedia` and has no
 audio out, so this can only be closed from a real browser.
+
+Step 12 (2026-09-16) built the instrument for closing this: the debug panel
+above. What to watch is in that entry. Still parked until a real-browser run
+shows the control case lighting and no fire while silent.
 
 ### 3. One escalated row left in the database
 

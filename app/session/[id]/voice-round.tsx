@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Button, Speaker, type SpeakerHandle, type SpeakerState } from "@/components/ui";
 import {
@@ -15,6 +22,30 @@ import type { VoiceSessionHandle } from "@/lib/voice/transport";
 import type { RoundView } from "@/lib/data/session";
 
 const transport = createSttTtsTransport();
+
+/*
+  The barge-in instrument, behind ?debug=1 and only ever outside production.
+  NODE_ENV is inlined at build time, so in a production bundle this is
+  `null` and the panel's module is never referenced, let alone loaded. In
+  development the import is still deferred until the flag is seen.
+*/
+const VoiceDebugPanel =
+  process.env.NODE_ENV !== "production"
+    ? dynamic(
+        () => import("./voice-debug-panel").then((m) => m.VoiceDebugPanel),
+        { ssr: false },
+      )
+    : null;
+
+function subscribeToUrl(onChange: () => void) {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
+function readDebugFlag() {
+  if (process.env.NODE_ENV === "production") return false;
+  return new URLSearchParams(window.location.search).get("debug") === "1";
+}
 
 export interface VoiceRoundProps {
   sessionId: string;
@@ -49,6 +80,14 @@ export function VoiceRound({
   const handleRef = useRef<VoiceSessionHandle | null>(null);
   const speakerRef = useRef<SpeakerHandle>(null);
   const spokenForRef = useRef<string | null>(null);
+  // The URL flag as an external store: the server snapshot is always false,
+  // so the server render is identical with or without ?debug=1 and the panel
+  // appears on the client after hydration, with no setState-in-effect.
+  const debug = useSyncExternalStore(
+    subscribeToUrl,
+    readDebugFlag,
+    () => false,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +234,19 @@ export function VoiceRound({
     }
   }, [mic, sessionId, current.id, elapsedSeconds, onTurnComplete, router]);
 
+  /** Debug panel: a long utterance, through the same path as a question. */
+  const speakTest = useCallback((text: string) => {
+    primeSpeech();
+    spokenForRef.current = null;
+    vlog("debug.test_utterance", { chars: text.length });
+    void speak(text, {
+      interrupt: true,
+      onStart: () => setSpeaking(true),
+      onEnd: () => setSpeaking(false),
+      onBoundary: () => speakerRef.current?.pulse(),
+    });
+  }, []);
+
   const recording = mic.state === "recording";
 
   // Priority order matters: a turn in flight outranks everything, and
@@ -210,6 +262,10 @@ export function VoiceRound({
 
   return (
     <div className="flex max-w-4xl flex-col gap-6">
+      {debug && VoiceDebugPanel ? (
+        <VoiceDebugPanel arm={mic.arm} speakTest={speakTest} />
+      ) : null}
+
       {/* The interviewer, seen. Solid is the interviewer; hollow is you being
           recorded — a split that survives prefers-reduced-motion, where the
           breathing and the rings stop but the shapes do not. */}
