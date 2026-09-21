@@ -1,12 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Cloud Run runs the image, not `next start`. Standalone traces the server
-  // and the slice of node_modules it actually needs into .next/standalone,
-  // which is what the Dockerfile's final stage copies — no full node_modules
-  // in the image. public/ and .next/static are not traced and are copied
-  // beside it by hand.
-  output: "standalone",
+  // Standalone is for the Docker/Cloud Run path: it traces the server and
+  // the slice of node_modules it needs into .next/standalone, which the
+  // Dockerfile's final stage copies. Not on Vercel — its adapter packages
+  // functions itself and does not write .next/next-server.js.nft.json, and
+  // the standalone copy step runs right after the adapter hook and opens
+  // that file (build/utils.js copyTracedFiles), failing the build with
+  // ENOENT. Next's own build code notes the two may become mutually
+  // exclusive. Vercel sets VERCEL=1 in every build.
+  output: process.env.VERCEL ? undefined : "standalone",
 
   // pdfjs-dist falls back to a "fake worker" that imports pdf.worker.mjs by
   // path. Bundled by Turbopack that import cannot resolve, and PDF parsing

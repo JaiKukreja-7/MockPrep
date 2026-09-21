@@ -138,4 +138,11 @@ build from a copy of the tree with no `.env.local` in it.
 `Dockerfile`, `.dockerignore`, `scripts/gcp-setup.sh` and `scripts/deploy.sh`
 still describe a working Cloud Run deployment (secrets from Secret Manager
 at start-up, nothing baked). `output: "standalone"` in `next.config.ts` is
-for that path; Vercel ignores it. Nothing here depends on it.
+for that path only: it is set when `VERCEL` is not in the environment.
+On Vercel it must be off — the adapter packages functions itself and does
+not write `.next/next-server.js.nft.json`, and Next's standalone copy step
+runs right after the adapter hook and opens that file, so the first Vercel
+build failed with ENOENT there. The pdfjs `outputFileTracingIncludes` is
+independent of `output`: it lands in the per-route `.nft.json` files, which
+are exactly what the Vercel adapter reads (verified with a `VERCEL=1`
+build).

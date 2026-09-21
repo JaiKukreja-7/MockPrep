@@ -266,6 +266,18 @@ by parsing a fixture from the standalone bundle's `node_modules` alone.
 `verify-deploy.sh` accepts Vercel's 308 for HTTP→HTTPS. `DEPLOY.md`
 rewritten for Vercel, with the Cloud Run path kept as a footnote.
 
+First Vercel build failed after `onBuildComplete` with ENOENT on
+`.next/next-server.js.nft.json`. Confirmed in Next's source
+(`build/index.js`): the adapter hook runs, then `output: "standalone"`'s
+`writeStandaloneDirectory → copyTracedFiles` opens that file, which the
+adapter path never writes — and a comment there anticipates the conflict.
+`output` is now `"standalone"` only when `VERCEL` is unset. Verified: a
+`VERCEL=1` build writes no standalone directory and the `/resume` trace
+still carries `pdf.worker.mjs` (the adapter's `loadNFT` reads those
+per-route traces); a plain build still produces the standalone tree with
+the worker in it for Docker. The ENOENT itself cannot be reproduced
+locally: it needs the adapter that `vercel build` injects.
+
 ### Error-state audit and fixes (step 14, 2026-09-16)
 
 Eight failure paths, exercised rather than reasoned about — the server ones
