@@ -311,6 +311,24 @@ solid answers — every canned answer in the run was weak or off-question,
 so every question drew one, which is the right call for those answers and
 says nothing about good ones yet.
 
+*Follow-up rate measured, both sides* (2026-09-21). Two instruments:
+`tests/integration/follow-up-rate.test.ts` runs the real task against a
+fixed corpus — ten questions across DSA, CS fundamentals, system design
+and behavioural, each with a strong answer (correct approach, stated
+complexity, named edge cases, or the type's equivalent) and a weak one —
+opt-in via `npm run measure:follow-up`, with thresholds as the contract
+(≤10% of strong probed, ≥90% of weak probed). Result over three repeats:
+**strong 0/30 probed, weak 30/30 probed.** Then a live engineering round as
+a fresher with strong answers written for the four questions it actually
+asked (longest subarray with sum ≤ k on *integers* — the answer had to
+notice negatives break the sliding window; deepest-leaves sum; blocking
+I/O in the scheduler; a read-through catalog cache): **0 of 4 probed**,
+straight to the report, scored 85 / 84 / … under the rubrics. The earlier
+run with weak answers had probed 4 of 4. No tightening was needed; the
+"a solid answer gets no follow-up" rule holds at both ends. Unmeasured:
+the middle — a right approach with no complexity stated — which is where a
+probe is the point.
+
 Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
 holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
 here until that is closed.
@@ -932,11 +950,9 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Watch the follow-up rate on good answers.** Every answer in the
-   acceptance run was weak and every question drew a probe — correct for
-   those, unknown for a solid answer. If real rounds show a probe on every
-   question, tighten the "solid answer gets nothing" instruction or add a
-   confidence field to the follow-up task.
+1. **Go live on Vercel** is done; **watch the follow-up rate in real
+   rounds** with `npm run measure:follow-up` if it ever feels off — the
+   corpus and the thresholds are in `tests/integration/follow-up-rate.test.ts`.
 2. **Go live on Vercel.** Follow `DEPLOY.md`: import `JaiKukreja-7/MockPrep`,
    set the five environment variables, deploy, pick the function region
    nearest Supabase, then add the domain to Supabase → Authentication → URL
