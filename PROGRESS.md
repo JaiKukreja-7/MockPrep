@@ -298,11 +298,18 @@ asks again and does answer it, a stale retry writes nothing, a brain
 failure answers as if no probe; the scoring prompt's rubrics and shape, and
 `scoreRounds`' derivations. 193 unit tests in all.
 
-**Needs `supabase/migrations/20260921000000_question_types.sql` applied.**
-Until then `startRound` fails with "Could not find the 'level' column" —
-seen on the dev server — and the live acceptance (an engineering round
-asking real DSA questions with a follow-up) cannot be run. Everything up to
-that point is built and green.
+*Accepted live* (2026-09-21, migration applied, dev server, real providers):
+an engineering round as a fresher came back as DSA · two pointers, DSA ·
+arrays, CS fundamentals · OOP, system design · URL shortener — each DSA
+question stated with an example and ending "walk me through your approach,
+then its time and space complexity". A vague "I would loop through it"
+drew **"What is the time complexity of your approach?"** as a follow-up
+with the original kept in view; a vague answer to that moved to question 2
+— no second probe. The report scored that first answer approach 10 ·
+complexity 20 · edge cases 5 → 12. Unverified: the probe rate on genuinely
+solid answers — every canned answer in the run was weak or off-question,
+so every question drew one, which is the right call for those answers and
+says nothing about good ones yet.
 
 Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
 holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
@@ -925,11 +932,11 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Apply `supabase/migrations/20260921000000_question_types.sql`** in
-   the Supabase SQL editor — question types, level, follow-ups, per-round
-   scores. Rounds cannot start until it is in. Then run the step-15 live
-   acceptance: an engineering round as a fresher, a vague answer, and the
-   follow-up appearing. (The two 2026-09-16 migrations are applied.)
+1. **Watch the follow-up rate on good answers.** Every answer in the
+   acceptance run was weak and every question drew a probe — correct for
+   those, unknown for a solid answer. If real rounds show a probe on every
+   question, tighten the "solid answer gets nothing" instruction or add a
+   confidence field to the follow-up task.
 2. **Go live on Vercel.** Follow `DEPLOY.md`: import `JaiKukreja-7/MockPrep`,
    set the five environment variables, deploy, pick the function region
    nearest Supabase, then add the domain to Supabase → Authentication → URL
