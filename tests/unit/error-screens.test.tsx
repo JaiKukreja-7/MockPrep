@@ -60,9 +60,9 @@ describe("the session screen with every round answered and no score", () => {
   const view: SessionView = {
     session: { id: "s1", title: "Strategy analyst", track: "consulting", status: "live", started_at: null },
     rounds: [
-      { id: "r1", ordinal: 1, question: "Q1", answered: true, mode: "text" },
-      { id: "r2", ordinal: 2, question: "Q2", answered: true, mode: "text" },
-      { id: "r3", ordinal: 3, question: "Q3", answered: true, mode: "text" },
+      { id: "r1", ordinal: 1, question: "Q1", type: "dsa", topic: "arrays", followUp: null, prompt: "Q1", answered: true, mode: "text" },
+      { id: "r2", ordinal: 2, question: "Q2", type: "dsa", topic: "graphs", followUp: null, prompt: "Q2", answered: true, mode: "text" },
+      { id: "r3", ordinal: 3, question: "Q3", type: "system_design", topic: null, followUp: null, prompt: "Q3", answered: true, mode: "text" },
     ],
     transcript: [{ id: "l1", at_seconds: 0, speaker: "interviewer", body: "Q1", flag: null }],
     current: null,
@@ -99,6 +99,7 @@ describe("the report for an unscored round", () => {
     session: { id: "s1", title: "Strategy analyst", track: "consulting" as const, status: "live" as const, started_at: null, duration_seconds: null },
     score: null,
     transcript: [],
+    rounds: [],
   };
 
   it("live and unscored: the scoring affordance", async () => {

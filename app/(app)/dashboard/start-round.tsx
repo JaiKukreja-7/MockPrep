@@ -61,6 +61,16 @@ export function StartRound({
         </label>
 
         <label className="flex min-w-40 flex-col gap-2">
+          <span className="eyebrow">Experience</span>
+          {/* Questions are pitched at this. "junior" is the 1–3 years band. */}
+          <select name="level" defaultValue="fresher" disabled={pending} className="input">
+            <option value="intern">Intern</option>
+            <option value="fresher">Fresher</option>
+            <option value="junior">1–3 years</option>
+          </select>
+        </label>
+
+        <label className="flex min-w-40 flex-col gap-2">
           <span className="eyebrow">Mode</span>
           <select name="mode" disabled={pending} className="input">
             <option value="text">Text</option>

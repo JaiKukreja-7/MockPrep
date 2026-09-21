@@ -71,6 +71,11 @@ export interface VoiceTurnResult {
   nextQuestion: string | null;
   /** Whole-round voice budget left, in seconds. Zero means hard stop. */
   remainingSeconds: number;
+  /**
+   * True when `nextQuestion` is a probing follow-up on the same question
+   * rather than the next one. The heading shows it; the round is not advanced.
+   */
+  followUp?: boolean;
   /** True when the round is over and scoring has been kicked off. */
   done: boolean;
   /**

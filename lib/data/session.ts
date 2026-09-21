@@ -1,10 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
-import type { RoundMode, SessionRow, TranscriptRow } from "@/lib/supabase/types";
+import type { QuestionType, RoundMode, SessionRow, TranscriptRow } from "@/lib/supabase/types";
 
 export interface RoundView {
   id: string;
   ordinal: number;
   question: string;
+  type: QuestionType;
+  topic: string | null;
+  /** The probing follow-up, once asked. */
+  followUp: string | null;
+  /** What the round is asking right now: the follow-up if pending, else the question. */
+  prompt: string;
   answered: boolean;
   mode: RoundMode;
 }
@@ -31,23 +37,31 @@ async function selectRounds(
   supabase: Awaited<ReturnType<typeof createClient>>,
   sessionId: string,
 ) {
-  const withMode = await supabase
+  const full = await supabase
     .from("rounds")
-    .select("id, ordinal, question, answered_at, mode")
+    .select("id, ordinal, question, answered_at, mode, question_type, topic, follow_up")
     .eq("session_id", sessionId)
     .order("ordinal", { ascending: true });
 
-  if (!withMode.error) return withMode;
+  if (!full.error) return full;
 
-  const withoutMode = await supabase
+  // Older schema: no voice or question-type columns yet.
+  const bare = await supabase
     .from("rounds")
     .select("id, ordinal, question, answered_at")
     .eq("session_id", sessionId)
     .order("ordinal", { ascending: true });
 
   return {
-    ...withoutMode,
-    data: withoutMode.data?.map((r) => ({ ...r, mode: "text" as const })) ?? null,
+    ...bare,
+    data:
+      bare.data?.map((r) => ({
+        ...r,
+        mode: "text" as const,
+        question_type: "behavioural" as const,
+        topic: null,
+        follow_up: null,
+      })) ?? null,
   };
 }
 
@@ -74,6 +88,10 @@ export async function getSession(id: string): Promise<SessionView | null> {
     id: r.id,
     ordinal: r.ordinal,
     question: r.question,
+    type: r.question_type ?? "behavioural",
+    topic: r.topic ?? null,
+    followUp: r.follow_up ?? null,
+    prompt: r.follow_up ?? r.question,
     answered: r.answered_at !== null,
     mode: r.mode ?? "text",
   }));
@@ -100,21 +118,39 @@ export async function getSession(id: string): Promise<SessionView | null> {
   };
 }
 
+export interface ReportRound {
+  id: string;
+  ordinal: number;
+  question: string;
+  type: QuestionType;
+  topic: string | null;
+  followUp: string | null;
+  score: number | null;
+  detail: Record<string, number> | null;
+}
+
 export interface ReportView {
   session: Pick<SessionRow, "id" | "title" | "track" | "status" | "started_at" | "duration_seconds">;
   score: { overall: number; structure: number; specificity: number; pace: number } | null;
   transcript: Array<Pick<TranscriptRow, "id" | "at_seconds" | "speaker" | "body" | "flag">>;
+  /** Per-question scores under each type's rubric. */
+  rounds: ReportRound[];
 }
 
 export async function getReport(id: string): Promise<ReportView | null> {
   const supabase = await createClient();
 
-  const [sessionResult, scoreResult, transcriptResult] = await Promise.all([
+  const [sessionResult, roundsResult, scoreResult, transcriptResult] = await Promise.all([
     supabase
       .from("sessions")
       .select("id, title, track, status, started_at, duration_seconds")
       .eq("id", id)
       .maybeSingle(),
+    supabase
+      .from("rounds")
+      .select("id, ordinal, question, question_type, topic, follow_up, score, score_detail")
+      .eq("session_id", id)
+      .order("ordinal", { ascending: true }),
     supabase
       .from("scores")
       .select("overall, structure, specificity, pace")
@@ -133,5 +169,15 @@ export async function getReport(id: string): Promise<ReportView | null> {
     session: sessionResult.data,
     score: scoreResult.data ?? null,
     transcript: transcriptResult.data ?? [],
+    rounds: (roundsResult.data ?? []).map((r) => ({
+      id: r.id,
+      ordinal: r.ordinal,
+      question: r.question,
+      type: r.question_type,
+      topic: r.topic,
+      followUp: r.follow_up,
+      score: r.score,
+      detail: r.score_detail,
+    })),
   };
 }

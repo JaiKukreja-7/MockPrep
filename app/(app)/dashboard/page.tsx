@@ -7,6 +7,7 @@ import {
   RuledRowList,
 } from "@/components/ui";
 import { getDashboard } from "@/lib/data/dashboard";
+import { TYPE_LABEL } from "@/lib/question-types";
 import { createClient } from "@/lib/supabase/server";
 import { StartRound } from "./start-round";
 
@@ -43,7 +44,7 @@ export default async function DashboardPage() {
   // it narrows the type.
   if (!data) redirect("/sign-in?next=/dashboard");
 
-  const { latest, upNext, recentSessions, focusAreas, heatmap } = data;
+  const { latest, byType, upNext, recentSessions, focusAreas, heatmap } = data;
 
   return (
     <>
@@ -82,6 +83,29 @@ export default async function DashboardPage() {
                   />
                 ))}
               </ul>
+
+              {/* Content scores by question type, across every scored round:
+                  the same meter treatment, so a weak DSA average reads next
+                  to a strong behavioural one at a glance. */}
+              {byType.length > 0 ? (
+                <div className="mt-10">
+                  <h3 className="eyebrow mb-2">By question type</h3>
+                  <ul>
+                    {byType.map((t) => (
+                      <RuledRow
+                        key={t.type}
+                        className="py-4"
+                        progress={t.average}
+                        title={<span className="eyebrow">{TYPE_LABEL[t.type]}</span>}
+                        meta={`${t.rounds} ${t.rounds === 1 ? "question" : "questions"}`}
+                        trailing={
+                          <span className="numeric text-u-body font-medium">{t.average}</span>
+                        }
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               <p className="mt-10">
                 <a

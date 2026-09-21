@@ -1,0 +1,21 @@
+/** Screen labels for the per-type rubric axes in lib/llm/tasks/score-answer.ts. */
+export const RUBRIC_LABEL: Record<string, string> = {
+  approach: "Approach",
+  complexity: "Complexity",
+  edge_cases: "Edge cases",
+  accuracy: "Accuracy",
+  depth: "Depth",
+  clarity: "Clarity",
+  requirements: "Requirements",
+  tradeoffs: "Trade-offs",
+  scalability: "Scalability",
+  situation: "Situation",
+  action: "Action",
+  result: "Result",
+  structure: "Structure",
+  numbers: "Numbers",
+  recommendation: "Recommendation",
+  user: "User",
+  metric: "Metric",
+  reasoning: "Reasoning",
+};

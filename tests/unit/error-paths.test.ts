@@ -37,6 +37,7 @@ const generateQuestions = vi.fn();
 const consumeQuota = vi.fn();
 const refundQuota = vi.fn();
 const scoreAnswer = vi.fn();
+const followUp = vi.fn();
 const extractFlags = vi.fn();
 const analyseResume = vi.fn();
 const transcribe = vi.fn();
@@ -47,7 +48,8 @@ vi.mock("@/lib/llm/quota", () => ({
   refundQuota: (...a: unknown[]) => refundQuota(...a),
   QuotaExceededError: class extends Error {},
 }));
-vi.mock("@/lib/llm/tasks/score-answer", () => ({ scoreAnswer: (...a: unknown[]) => scoreAnswer(...a) }));
+vi.mock("@/lib/llm/tasks/score-answer", () => ({ scoreRounds: (...a: unknown[]) => scoreAnswer(...a) }));
+vi.mock("@/lib/llm/tasks/follow-up", () => ({ followUp: (...a: unknown[]) => followUp(...a) }));
 vi.mock("@/lib/llm/tasks/extract-flags", () => ({ extractFlags: (...a: unknown[]) => extractFlags(...a) }));
 vi.mock("@/lib/llm/tasks/analyse-resume", () => ({ analyseResume: (...a: unknown[]) => analyseResume(...a) }));
 vi.mock("@/lib/llm/tasks/transcribe", () => ({ transcribe: (...a: unknown[]) => transcribe(...a) }));
@@ -78,9 +80,10 @@ beforeEach(() => {
   authResult = { user: { id: "u1" } };
   consumeQuota.mockReset().mockResolvedValue({ allowed: true, used: 1, cap: 60 });
   refundQuota.mockReset().mockResolvedValue(undefined);
-  scoreAnswer.mockReset().mockResolvedValue({ overall: 50, structure: 50, specificity: 50, pace: 50 });
+  scoreAnswer.mockReset().mockResolvedValue({ overall: 50, structure: 50, specificity: 50, pace: 50, note: "", rounds: [] });
+  followUp.mockReset().mockResolvedValue({ probe: null, provider: "x" });
   extractFlags.mockReset().mockResolvedValue({ flags: [], provider: "x" });
-  generateQuestions.mockReset().mockResolvedValue({ questions: ["Q1", "Q2", "Q3"] });
+  generateQuestions.mockReset().mockResolvedValue({ questions: [{ type: "dsa", topic: "arrays", question: "Q1" }, { type: "dsa", topic: "graphs", question: "Q2" }, { type: "system_design", topic: null, question: "Q3" }] });
   interviewerTurn.mockReset().mockResolvedValue({ text: "Noted." });
   vi.mocked(revalidatePath).mockClear();
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -99,8 +102,8 @@ describe("submitAnswer is idempotent on an answered round", () => {
 
   it("writes nothing for a round that already has answered_at, and goes on to score", async () => {
     resolver = (op) => {
-      if (op.table === "rounds" && called(op, "select", "id, session_id, answered_at"))
-        return { data: { id: "r3", session_id: "s1", answered_at: "2026-09-16T00:00:00Z" } };
+      if (op.table === "rounds" && called(op, "select", "id, session_id, answered_at, follow_up, question_type, question"))
+        return { data: { id: "r3", session_id: "s1", answered_at: "2026-09-16T00:00:00Z", follow_up: null, question_type: "dsa", question: "Q" } };
       if (isRoundsRemaining(op)) return { count: 0 } as never;
       if (op.table === "transcripts") return { data: lines };
       return {};
@@ -116,8 +119,8 @@ describe("submitAnswer is idempotent on an answered round", () => {
 
   it("writes exactly once for an unanswered round", async () => {
     resolver = (op) => {
-      if (op.table === "rounds" && called(op, "select", "id, session_id, answered_at"))
-        return { data: { id: "r1", session_id: "s1", answered_at: null } };
+      if (op.table === "rounds" && called(op, "select", "id, session_id, answered_at, follow_up, question_type, question"))
+        return { data: { id: "r1", session_id: "s1", answered_at: null, follow_up: null, question_type: "dsa", question: "Q" } };
       if (isRoundsRemaining(op)) return { count: 2 } as never;
       return {};
     };
@@ -128,8 +131,8 @@ describe("submitAnswer is idempotent on an answered round", () => {
 
   it("refuses a round that belongs to a different session", async () => {
     resolver = (op) =>
-      op.table === "rounds" && called(op, "select", "id, session_id, answered_at")
-        ? { data: { id: "r1", session_id: "other", answered_at: null } }
+      op.table === "rounds" && called(op, "select", "id, session_id, answered_at, follow_up, question_type, question")
+        ? { data: { id: "r1", session_id: "other", answered_at: null, follow_up: null, question_type: "dsa", question: "Q" } }
         : {};
     const out = await submitAnswer({}, form({ sessionId: "s1", roundId: "r1", question: "Q", answer: "A", elapsed: "30" }));
     expect(out.error).toMatch(/not part of this round/);
@@ -140,8 +143,8 @@ describe("submitAnswer is idempotent on an answered round", () => {
 /* ------------------------------------------- #2 / #3 the dead ends, and #6 */
 describe("the last answer when scoring cannot happen", () => {
   const answered = (op: RecordedOp) =>
-    op.table === "rounds" && called(op, "select", "id, session_id, answered_at")
-      ? { data: { id: "r3", session_id: "s1", answered_at: null } }
+    op.table === "rounds" && called(op, "select", "id, session_id, answered_at, follow_up, question_type, question")
+      ? { data: { id: "r3", session_id: "s1", answered_at: null, follow_up: null, question_type: "dsa", question: "Q" } }
       : isRoundsRemaining(op)
         ? ({ count: 0 } as never)
         : op.table === "transcripts" && !has(op, "insert")
@@ -333,8 +336,8 @@ describe("voice turn route", () => {
   const base: Resolver = (op) =>
     op.table === "users"
       ? { data: { is_guest: false } }
-      : op.table === "rounds" && called(op, "select", "id, ordinal, question, session_id")
-        ? { data: { id: "r1", ordinal: 3, question: "Q", session_id: "s1" } }
+      : op.table === "rounds" && called(op, "select", "id, ordinal, question, session_id, question_type, follow_up, answered_at")
+        ? { data: { id: "r1", ordinal: 3, question: "Q", session_id: "s1", question_type: "dsa", follow_up: null, answered_at: null } }
         : op.table === "rounds" && has(op, "is")
           ? { data: [] } // no rounds remaining → this was the last one
           : op.table === "transcripts" && has(op, "insert")

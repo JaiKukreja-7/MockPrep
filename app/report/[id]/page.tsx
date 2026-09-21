@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { getReport } from "@/lib/data/session";
 import { ScoreRetry } from "@/app/session/[id]/score-retry";
+import { TYPE_LABEL } from "@/lib/question-types";
+import { RUBRIC_LABEL } from "@/lib/question-rubric";
 
 export const metadata = { title: "Scored report — MockPrep" };
 
@@ -37,7 +39,8 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
   const view = await getReport(id);
   if (!view) notFound();
 
-  const { session, score, transcript } = view;
+  const { session, score, transcript, rounds } = view;
+  const scoredRounds = rounds.filter((r) => r.score !== null);
   const flagged = transcript.filter((line) => line.flag).length;
   const length = clock(session.duration_seconds);
   const date = session.started_at
@@ -136,6 +139,57 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
               <ScoreRetry sessionId={session.id} />
             </div>
           )}
+
+          {/* ------------------------------------------------ by question
+              Each question scored under its own rubric — a DSA answer on
+              approach, complexity and edge cases, not on whether it had a
+              shape. The row's rule is the meter, as everywhere else. */}
+          {scoredRounds.length > 0 ? (
+            <div className="mt-12">
+              <h3 className="eyebrow mb-4">By question</h3>
+              <RuledRowList>
+                {scoredRounds.map((round) => (
+                  <RuledRow
+                    key={round.id}
+                    className="py-6"
+                    scale="ui"
+                    progress={round.score ?? 0}
+                    stackTrailing
+                    title={round.question}
+                    meta={
+                      <>
+                        {TYPE_LABEL[round.type]}
+                        {round.topic ? (
+                          <>
+                            {" "}
+                            <span aria-hidden>·</span> {round.topic}
+                          </>
+                        ) : null}
+                        {round.followUp ? (
+                          <>
+                            {" "}
+                            <span aria-hidden>·</span> Follow-up asked
+                          </>
+                        ) : null}
+                        {round.detail ? (
+                          <>
+                            {" "}
+                            <span aria-hidden>·</span>{" "}
+                            {Object.entries(round.detail)
+                              .map(([k, v]) => `${RUBRIC_LABEL[k] ?? k} ${v}`)
+                              .join(" · ")}
+                          </>
+                        ) : null}
+                      </>
+                    }
+                    trailing={
+                      <span className="numeric text-u-lg font-medium">{round.score}</span>
+                    }
+                  />
+                ))}
+              </RuledRowList>
+            </div>
+          ) : null}
         </section>
 
         <section aria-labelledby="transcript-heading" className="min-w-0">

@@ -248,6 +248,66 @@ it loads cleanly with Groq as the only leg.
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
 
+### Questions by type, level, follow-ups, rubric scoring (step 15, 2026-09-21)
+
+The engineering track was producing generic behavioural questions. Now:
+
+- **A plan per track** (`ROUND_PLAN` in `generate-questions.ts`): engineering
+  is `dsa, dsa, cs_fundamentals, system_design` — four questions; the other
+  tracks keep three with a behavioural one last. DSA topics are drawn from a
+  bucket that widens with level (intern: arrays/strings/hashing; 1–3 years:
+  two pointers/trees/graphs/DP), two distinct per round; CS from
+  OS/DBMS/networks/OOP. The prompt asks DSA the way a phone screen does —
+  state the problem with a tiny example, then approach, complexity, what
+  breaks it, no code — and pitches everything at the level's brief. The
+  plan's type wins over whatever the model labelled a slot.
+- **Experience on the start form** — intern / fresher / 1–3 years (`junior`
+  in the column), stored on the session.
+- **Question type and topic stored on each round**; shown in the session
+  eyebrow, on the report per question, and averaged by type on the
+  dashboard.
+- **One adaptive follow-up per question.** After the first answer,
+  `follow_up` task decides whether to probe (weak, vague, no complexity, no
+  edge case, no trade-off — the gap list is per type) and returns one
+  question or null; the probe is stored on the round, so the cap of one is a
+  fact of the row. The session screen shows the probe as the question with
+  the original above it; the voice route returns it as `nextQuestion` with
+  `followUp: true` and no bridge line, so it is read aloud as the question
+  now is. `submitAnswer` refuses a submit whose `question` is not what the
+  round is currently asking, which is what stops a stale retry of the first
+  answer landing as the follow-up answer. A brain failure skips the probe
+  and never loses the round.
+- **Scoring per round under a rubric** (`scoreRounds`): the session's three
+  delivery meters stay; each round also gets a content score as the mean of
+  three type-specific axes — DSA: approach, complexity, edge cases; system
+  design: requirements, trade-offs, scalability; CS: accuracy, depth,
+  clarity; behavioural: situation, action, result; case: structure,
+  numbers, recommendation; product: user, metric, reasoning. One model call
+  for the whole session. Missing axes are zeros, invented axes are dropped,
+  hallucinated ordinals ignored. Written to `rounds.score` /
+  `rounds.score_detail`; the report lists "By question" with the axes; the
+  dashboard lists "By question type" with meters.
+
+*Tested* (46 new): the plan and the level buckets; the prompt's structure
+(slots in order with types and topics, the phone-screen phrasing, the level
+briefs, the JSON shape); parsing (plan type wins, bare strings tolerated,
+nothing usable throws); the follow-up prompt's per-type gaps and examples;
+`sanitiseProbe` (twelve cases); **the cap in both loops** — first weak answer
+stores the probe and does not answer the round, the probe's answer never
+asks again and does answer it, a stale retry writes nothing, a brain
+failure answers as if no probe; the scoring prompt's rubrics and shape, and
+`scoreRounds`' derivations. 193 unit tests in all.
+
+**Needs `supabase/migrations/20260921000000_question_types.sql` applied.**
+Until then `startRound` fails with "Could not find the 'level' column" —
+seen on the dev server — and the live acceptance (an engineering round
+asking real DSA questions with a follow-up) cannot be run. Everything up to
+that point is built and green.
+
+Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
+holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
+here until that is closed.
+
 ### Vercel (2026-09-21)
 
 Target moved from Cloud Run to Vercel. `maxDuration` on every route that
@@ -865,10 +925,11 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Apply two migrations** in the Supabase SQL editor:
-   `supabase/migrations/20260916000000_delete_own_guest.sql` and
-   `supabase/migrations/20260916010000_refund_llm_quota.sql`. The
-   integration project is red until both are in.
+1. **Apply `supabase/migrations/20260921000000_question_types.sql`** in
+   the Supabase SQL editor — question types, level, follow-ups, per-round
+   scores. Rounds cannot start until it is in. Then run the step-15 live
+   acceptance: an engineering round as a fresher, a vague answer, and the
+   follow-up appearing. (The two 2026-09-16 migrations are applied.)
 2. **Go live on Vercel.** Follow `DEPLOY.md`: import `JaiKukreja-7/MockPrep`,
    set the five environment variables, deploy, pick the function region
    nearest Supabase, then add the domain to Supabase → Authentication → URL

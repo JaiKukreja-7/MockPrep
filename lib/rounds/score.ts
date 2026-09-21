@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { consumeQuota } from "@/lib/llm/quota";
-import { scoreAnswer } from "@/lib/llm/tasks/score-answer";
+import { scoreRounds, type RoundToScore } from "@/lib/llm/tasks/score-answer";
 import { extractFlags } from "@/lib/llm/tasks/extract-flags";
 import { describeLlmFailure } from "@/lib/llm/user-message";
 
@@ -31,17 +31,35 @@ export async function scoreSession(
     };
   }
 
-  const { data: lines } = await supabase
-    .from("transcripts")
-    .select("id, at_seconds, speaker, body")
-    .eq("session_id", sessionId)
-    .order("at_seconds", { ascending: true });
+  const [{ data: lines }, { data: rounds }] = await Promise.all([
+    supabase
+      .from("transcripts")
+      .select("id, round_id, at_seconds, speaker, body")
+      .eq("session_id", sessionId)
+      .order("at_seconds", { ascending: true }),
+    supabase
+      .from("rounds")
+      .select("id, ordinal, question, question_type, topic, follow_up")
+      .eq("session_id", sessionId)
+      .order("ordinal", { ascending: true }),
+  ]);
 
   if (!lines || lines.length === 0) return { ok: false, error: "Nothing to score yet." };
 
-  const exchange = lines
-    .map((l) => `${l.speaker === "interviewer" ? "Q" : "A"}: ${l.body}`)
-    .join("\n\n");
+  // Each round's exchange from its own transcript lines: the first candidate
+  // line answers the question, the second (if any) answers the follow-up.
+  const toScore: RoundToScore[] = (rounds ?? []).map((r) => {
+    const said = lines.filter((l) => l.round_id === r.id && l.speaker === "candidate");
+    return {
+      ordinal: r.ordinal,
+      type: r.question_type,
+      topic: r.topic,
+      question: r.question,
+      answer: said[0]?.body ?? "",
+      followUp: r.follow_up,
+      followUpAnswer: r.follow_up ? (said[1]?.body ?? null) : null,
+    };
+  });
 
   const indexed = lines.map((l, index) => ({
     index,
@@ -52,10 +70,7 @@ export async function scoreSession(
   try {
     // Independent, and each may spend its backoff ladder before failing over.
     const [score, flagResult] = await Promise.all([
-      scoreAnswer({
-        question: "The full exchange below is one mock interview round.",
-        answer: exchange,
-      }),
+      scoreRounds(toScore),
       extractFlags(indexed),
     ]);
 
@@ -66,6 +81,17 @@ export async function scoreSession(
       specificity: score.specificity,
       pace: score.pace,
     });
+
+    // Per-round content scores, under each round's own rubric.
+    const roundById = new Map((rounds ?? []).map((r) => [r.ordinal, r.id]));
+    await Promise.all(
+      score.rounds.map((rs) => {
+        const id = roundById.get(rs.ordinal);
+        return id
+          ? supabase.from("rounds").update({ score: rs.score, score_detail: rs.detail }).eq("id", id)
+          : Promise.resolve();
+      }),
+    );
 
     await Promise.all(
       flagResult.flags.map((f) =>

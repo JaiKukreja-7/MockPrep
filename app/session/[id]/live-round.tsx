@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { submitAnswer, type ActionState } from "@/app/rounds/actions";
 import { describeSubmitFailure } from "@/lib/client-errors";
+import { TYPE_LABEL } from "@/lib/question-types";
 import type { SessionView } from "@/lib/data/session";
 import { ScoreRetry } from "./score-retry";
 import { VoiceRound } from "./voice-round";
@@ -112,11 +113,23 @@ export function LiveRound({ view }: { view: SessionView }) {
         <section className="px-8 pt-12 pb-10">
           <p className="eyebrow">
             {current
-              ? `Question ${Math.min(answered + 1, rounds.length)} of ${rounds.length}`
+              ? [
+                  current.followUp ? "Follow-up" : null,
+                  `Question ${Math.min(answered + 1, rounds.length)} of ${rounds.length}`,
+                  TYPE_LABEL[current.type],
+                  current.topic,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
               : "Round complete"}
           </p>
+          {current?.followUp ? (
+            /* The follow-up is the question now; the original stays in view
+               at reading size, because the probe only makes sense against it. */
+            <p className="mt-4 max-w-4xl text-u-lg">{current.question}</p>
+          ) : null}
           <h1 className="display text-u-display mt-4 max-w-4xl">
-            {current?.question ?? "Every question is answered."}
+            {current?.prompt ?? "Every question is answered."}
           </h1>
         </section>
 
@@ -147,7 +160,10 @@ export function LiveRound({ view }: { view: SessionView }) {
             <form action={formAction} className="flex max-w-4xl flex-col gap-6">
               <input type="hidden" name="sessionId" value={session.id} />
               <input type="hidden" name="roundId" value={current.id} />
-              <input type="hidden" name="question" value={current.question} />
+              {/* What is being asked right now — the follow-up when one is
+                  pending. It becomes the interviewer's transcript line, and
+                  the server uses it to tell a live submit from a stale retry. */}
+              <input type="hidden" name="question" value={current.prompt} />
               <input type="hidden" name="elapsed" value={elapsed} />
 
               <label className="flex flex-col gap-2">

@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Track, TranscriptFlag } from "@/lib/supabase/types";
+import type { QuestionType, Track, TranscriptFlag } from "@/lib/supabase/types";
 
 /* --------------------------------------------------------------------------
    Read models for the dashboard. Everything here is scoped by RLS rather than
@@ -42,8 +42,17 @@ export interface HeatmapData {
   columns: number;
 }
 
+export interface TypeAverage {
+  type: QuestionType;
+  /** Mean per-round score across every scored round of this type. */
+  average: number;
+  rounds: number;
+}
+
 export interface DashboardData {
   latest: Breakdown | null;
+  /** Content scores by question type, across all scored rounds. */
+  byType: TypeAverage[];
   upNext: UpNext | null;
   recentSessions: RecentSession[];
   focusAreas: FocusArea[];
@@ -188,7 +197,7 @@ export async function getDashboard(): Promise<DashboardData | null> {
   const yearAgo = new Date();
   yearAgo.setDate(yearAgo.getDate() - WEEKS * 7);
 
-  const [recentResult, upNextResult, flagsResult, historyResult] = await Promise.all([
+  const [recentResult, upNextResult, flagsResult, historyResult, typeResult] = await Promise.all([
     supabase
       .from("sessions")
       .select(
@@ -219,6 +228,10 @@ export async function getDashboard(): Promise<DashboardData | null> {
       .select("started_at")
       .not("started_at", "is", null)
       .gte("started_at", yearAgo.toISOString()),
+
+    // Every scored round, one row each; grouped here. RLS keeps it to the
+    // user's own sessions.
+    supabase.from("rounds").select("question_type, score").not("score", "is", null),
   ]);
 
   if (recentResult.error) throw recentResult.error;
@@ -227,6 +240,18 @@ export async function getDashboard(): Promise<DashboardData | null> {
   if (historyResult.error) throw historyResult.error;
 
   const rows = recentResult.data ?? [];
+
+  const sums = new Map<QuestionType, { total: number; n: number }>();
+  for (const r of typeResult.data ?? []) {
+    if (r.score === null) continue;
+    const acc = sums.get(r.question_type) ?? { total: 0, n: 0 };
+    acc.total += r.score;
+    acc.n += 1;
+    sums.set(r.question_type, acc);
+  }
+  const byType: TypeAverage[] = [...sums.entries()]
+    .map(([type, { total, n }]) => ({ type, average: Math.round(total / n), rounds: n }))
+    .sort((a, b) => b.rounds - a.rounds || a.type.localeCompare(b.type));
 
   const recentSessions: RecentSession[] = rows.map((row) => {
     const score = oneOf(row.scores);
@@ -274,5 +299,5 @@ export async function getDashboard(): Promise<DashboardData | null> {
       .filter((v): v is string => v !== null),
   );
 
-  return { latest, upNext, recentSessions, focusAreas, heatmap };
+  return { latest, byType, upNext, recentSessions, focusAreas, heatmap };
 }

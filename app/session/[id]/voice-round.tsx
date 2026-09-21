@@ -149,9 +149,12 @@ export function VoiceRound({
      acknowledgement is mid-sentence — it would cut its own bridge line off
      before the next question started. Cancellation belongs to teardown only,
      in the effect below. */
+  // A pending follow-up is a new thing to say on the same round, so the key
+  // changes with it and the probe is read aloud as the question now is.
+  const promptKey = current.followUp ? `${current.id}:follow-up` : current.id;
   useEffect(() => {
-    void readQuestion(current.question, current.id);
-  }, [current.id, current.question, readQuestion]);
+    void readQuestion(current.prompt, promptKey);
+  }, [promptKey, current.prompt, readQuestion]);
 
   /* Round teardown: leaving the session kills the whole queue, so speech
      never carries into the next round or the report.
@@ -173,8 +176,8 @@ export function VoiceRound({
     setNeedsGesture(false);
     await mic.arm();
     spokenForRef.current = null;
-    void readQuestion(current.question, current.id);
-  }, [mic, readQuestion, current.id, current.question]);
+    void readQuestion(current.prompt, promptKey);
+  }, [mic, readQuestion, promptKey, current.prompt]);
 
   const beginRecording = useCallback(async () => {
     // Arming here too, so the first tap works even if sound was already on.

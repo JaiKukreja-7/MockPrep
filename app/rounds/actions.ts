@@ -7,11 +7,12 @@ import { OUTAGE_MESSAGE } from "@/lib/supabase/outage";
 import { currentUser } from "@/lib/supabase/user";
 import { consumeQuota, refundQuota } from "@/lib/llm/quota";
 import { describeLlmFailure } from "@/lib/llm/user-message";
-import { generateQuestions } from "@/lib/llm/tasks/generate-questions";
+import { generateQuestions, type GeneratedQuestion } from "@/lib/llm/tasks/generate-questions";
+import { followUp } from "@/lib/llm/tasks/follow-up";
 import { scoreSession } from "@/lib/rounds/score";
-import type { RoundMode, Track } from "@/lib/supabase/types";
+import type { ExperienceLevel, RoundMode, Track } from "@/lib/supabase/types";
 
-const QUESTIONS_PER_ROUND = 3;
+const LEVELS: ExperienceLevel[] = ["intern", "fresher", "junior"];
 
 export interface ActionState {
   error?: string;
@@ -32,6 +33,10 @@ export async function startRound(
   const track = (String(formData.get("track") ?? "general") || "general") as Track;
   const role = String(formData.get("role") ?? "").trim() || "Graduate analyst";
   const requestedMode = String(formData.get("mode") ?? "text") === "voice" ? "voice" : "text";
+  const levelRaw = String(formData.get("level") ?? "fresher");
+  const level: ExperienceLevel = LEVELS.includes(levelRaw as ExperienceLevel)
+    ? (levelRaw as ExperienceLevel)
+    : "fresher";
 
   const supabase = await createClient();
   const { user, outage } = await currentUser(supabase);
@@ -61,13 +66,9 @@ export async function startRound(
     };
   }
 
-  let questions: string[];
+  let questions: GeneratedQuestion[];
   try {
-    ({ questions } = await generateQuestions({
-      track,
-      role,
-      count: QUESTIONS_PER_ROUND,
-    }));
+    ({ questions } = await generateQuestions({ track, role, level }));
   } catch (error) {
     await refundQuota(1);
     return {
@@ -85,6 +86,7 @@ export async function startRound(
       user_id: user.id,
       title: role,
       track,
+      level,
       status: "live",
       started_at: new Date().toISOString(),
     })
@@ -100,10 +102,12 @@ export async function startRound(
   // database that has not had the voice migration applied yet — the column
   // defaults to 'text' once it exists, and does not need to exist before then.
   const { error: roundsError } = await supabase.from("rounds").insert(
-    questions.map((question, i) => ({
+    questions.map((q, i) => ({
       session_id: session.id,
       ordinal: i + 1,
-      question,
+      question: q.question,
+      question_type: q.type,
+      topic: q.topic,
       asked_at: new Date().toISOString(),
       ...(mode === "voice" ? { mode } : {}),
     })),
@@ -123,6 +127,12 @@ export async function startRound(
  * scoring failure, a double click, a retry from a dead connection — writes
  * nothing and goes straight to whatever is left to do. The first version
  * inserted the transcript lines again on every retry.
+ *
+ * The follow-up: after the first answer to a question, the interviewer may
+ * ask one probing follow-up — "what is the time complexity?", "what if the
+ * input is empty?" — if the answer was weak. It is stored on the round, so
+ * the cap of one is a fact of the row: a round with a follow-up stored never
+ * gets another, whatever the second answer looks like.
  */
 export async function submitAnswer(
   _prev: ActionState,
@@ -143,12 +153,22 @@ export async function submitAnswer(
 
   const { data: round } = await supabase
     .from("rounds")
-    .select("id, session_id, answered_at")
+    .select("id, session_id, answered_at, follow_up, question_type, question")
     .eq("id", roundId)
     .maybeSingle();
 
   if (!round || round.session_id !== sessionId) {
     return { error: "That question is not part of this round any more. Reload the page." };
+  }
+
+  // What the round is asking right now: the follow-up if one is pending,
+  // else the question. A submit for anything else is a stale retry — the
+  // first answer arrived, its response did not — and must not be written
+  // a second time.
+  const asking = round.follow_up ?? round.question;
+  if (!round.answered_at && question !== asking) {
+    revalidatePath(`/session/${sessionId}`);
+    return {};
   }
 
   if (!round.answered_at) {
@@ -169,6 +189,18 @@ export async function submitAnswer(
       },
     ]);
     if (insertError) return { error: insertError.message };
+
+    // First answer to this question, and no follow-up spent yet: the
+    // interviewer may probe once. A stored follow-up means this submit IS the
+    // follow-up answer, so the round is done either way after this.
+    if (!round.follow_up) {
+      const probe = await probeFor(supabase, sessionId, round, answer);
+      if (probe) {
+        await supabase.from("rounds").update({ follow_up: probe }).eq("id", roundId);
+        revalidatePath(`/session/${sessionId}`);
+        return {};
+      }
+    }
 
     await supabase
       .from("rounds")
@@ -251,4 +283,34 @@ export async function scoreRound(
   revalidatePath("/dashboard");
   revalidatePath(`/session/${sessionId}`);
   redirect(`/report/${sessionId}`);
+}
+
+/**
+ * Asks the follow-up task whether to probe. Never throws: a follow-up is a
+ * nicety, and losing the brain must not lose the round. The session's level
+ * is read here rather than threaded through the form, so it cannot be spoofed.
+ */
+async function probeFor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sessionId: string,
+  round: { question_type: import("@/lib/supabase/types").QuestionType; question: string },
+  answer: string,
+): Promise<string | null> {
+  try {
+    const { data: session } = await supabase
+      .from("sessions")
+      .select("level")
+      .eq("id", sessionId)
+      .maybeSingle();
+    const { probe } = await followUp({
+      type: round.question_type,
+      level: session?.level ?? "fresher",
+      question: round.question,
+      answer,
+    });
+    return probe;
+  } catch (error) {
+    console.error(`[mockprep] follow-up skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }

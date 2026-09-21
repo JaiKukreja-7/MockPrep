@@ -23,6 +23,15 @@ export type FindingCategory =
   | "formatting"
   | "bullets";
 export type TranscriptFlag = "filler" | "restated" | "no_number" | "rambled";
+export type QuestionType =
+  | "behavioural"
+  | "case"
+  | "product_sense"
+  | "dsa"
+  | "cs_fundamentals"
+  | "system_design";
+/** "junior" is the 1–3 years band. */
+export type ExperienceLevel = "intern" | "fresher" | "junior";
 
 export type UserRow = {
   id: string;
@@ -47,6 +56,7 @@ export type SessionRow = {
   title: string;
   track: Track;
   status: SessionStatus;
+  level: ExperienceLevel;
   scheduled_for: string | null;
   started_at: string | null;
   ended_at: string | null;
@@ -60,6 +70,13 @@ export type RoundRow = {
   ordinal: number;
   mode: RoundMode;
   question: string;
+  question_type: QuestionType;
+  topic: string | null;
+  /** The one probing follow-up; non-null spends the cap. */
+  follow_up: string | null;
+  /** Per-round content score under the type's rubric. */
+  score: number | null;
+  score_detail: Record<string, number> | null;
   asked_at: string | null;
   answered_at: string | null;
   created_at: string;
@@ -155,7 +172,7 @@ export interface Database {
         Insert: Writable<
           SessionRow,
           "id" | "created_at",
-          "track" | "status" | "scheduled_for" | "started_at" | "ended_at" | "duration_seconds"
+          "track" | "status" | "level" | "scheduled_for" | "started_at" | "ended_at" | "duration_seconds"
         >;
         Update: Partial<SessionRow>;
         Relationships: [
@@ -170,7 +187,7 @@ export interface Database {
       };
       rounds: {
         Row: RoundRow;
-        Insert: Writable<RoundRow, "id" | "created_at", "asked_at" | "answered_at" | "mode">;
+        Insert: Writable<RoundRow, "id" | "created_at", "asked_at" | "answered_at" | "mode" | "question_type" | "topic" | "follow_up" | "score" | "score_detail">;
         Update: Partial<RoundRow>;
         Relationships: [
           {
@@ -248,6 +265,8 @@ export interface Database {
       analysis_kind: AnalysisKind;
       round_mode: RoundMode;
       session_status: SessionStatus;
+      question_type: QuestionType;
+      experience_level: ExperienceLevel;
       track: Track;
       speaker: Speaker;
       transcript_flag: TranscriptFlag;

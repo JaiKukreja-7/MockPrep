@@ -5,6 +5,7 @@ import { currentUser } from "@/lib/supabase/user";
 import { describeLlmFailure } from "@/lib/llm/user-message";
 import { transcribe } from "@/lib/llm/tasks/transcribe";
 import { interviewerTurn } from "@/lib/llm/tasks/interviewer-turn";
+import { followUp } from "@/lib/llm/tasks/follow-up";
 import { scoreSession } from "@/lib/rounds/score";
 import type { VoiceTurnResult } from "@/lib/voice/transport";
 
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
 
   const { data: round } = await supabase
     .from("rounds")
-    .select("id, ordinal, question, session_id")
+    .select("id, ordinal, question, session_id, question_type, follow_up, answered_at")
     .eq("id", roundId)
     .maybeSingle();
 
@@ -133,13 +134,15 @@ export async function POST(request: NextRequest) {
   }
 
   /* -------------------------------------------- persist what was said */
+  // What was actually asked this turn: the follow-up if one is pending.
+  const asking = round.follow_up ?? round.question;
   const lines = [
     {
       session_id: sessionId,
       round_id: roundId,
       at_seconds: Math.max(0, Math.round(offsetMs / 1000) - 1),
       speaker: "interviewer" as const,
-      body: round.question,
+      body: asking,
       start_ms: Math.max(0, offsetMs - 1),
       end_ms: Math.max(0, offsetMs),
     },
@@ -157,6 +160,37 @@ export async function POST(request: NextRequest) {
   const { error: writeError } = await supabase.from("transcripts").insert(lines);
   if (writeError) {
     return NextResponse.json({ error: writeError.message }, { status: 500 });
+  }
+
+  /* -------------------------------------------------------- follow-up
+     One probe per question, stored on the round; a stored follow-up means
+     this turn answered it. The probe travels as the next question — verbatim,
+     the same string the heading will show — with no bridge line, since the
+     probe is the interviewer's response. */
+  if (!round.follow_up) {
+    let probe: string | null = null;
+    try {
+      const { data: session } = await supabase.from("sessions").select("level").eq("id", sessionId).maybeSingle();
+      ({ probe } = await followUp({
+        type: round.question_type,
+        level: session?.level ?? "fresher",
+        question: round.question,
+        answer: text,
+      }));
+    } catch (error) {
+      console.error(`[mockprep] follow-up skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (probe) {
+      await supabase.from("rounds").update({ follow_up: probe }).eq("id", roundId);
+      return NextResponse.json({
+        lines: lines.map((l) => ({ speaker: l.speaker, text: l.body, startMs: l.start_ms, endMs: l.end_ms })),
+        acknowledgement: null,
+        nextQuestion: probe,
+        followUp: true,
+        remainingSeconds: Math.max(0, Math.round((MAX_ROUND_MS - alreadyMs - durationMs) / 1000)),
+        done: false,
+      } satisfies VoiceTurnResult);
+    }
   }
 
   await supabase

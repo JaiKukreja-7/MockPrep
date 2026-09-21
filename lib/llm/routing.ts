@@ -6,6 +6,7 @@ export type LLMTask =
   | "answer_scoring"
   | "flag_extraction"
   | "interviewer_turn"
+  | "follow_up"
   | "resume_analysis";
 
 export interface RouteStep {
@@ -86,6 +87,17 @@ export const TASKS: Record<LLMTask, TaskConfig> = {
       { provider: "groq", model: "openai/gpt-oss-120b" },
     ],
     maxOutputTokens: 2000,
+  },
+
+  // One probing follow-up after a weak answer. Small, fast, and it sees the
+  // candidate's answer, so it takes the same chain as the voice brain.
+  follow_up: {
+    sensitive: false,
+    chain: [
+      { provider: "groq", model: "openai/gpt-oss-120b" },
+      { provider: "gemini", model: "gemini-3.6-flash" },
+    ],
+    maxOutputTokens: 1500,
   },
 
   resume_analysis: {
