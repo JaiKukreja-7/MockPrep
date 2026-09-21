@@ -1,167 +1,141 @@
-# Deploying MockPrep to Cloud Run — from the console
+# Deploying MockPrep to Vercel
 
-Cloud Run watches the GitHub repo, Cloud Build builds the `Dockerfile` on
-every push to `main`, and the service reads its five variables from Secret
-Manager at start-up. The image carries no environment: `.dockerignore` keeps
-every `.env*` out of the build context and nothing in the app reads a
-variable at build time, so the same image serves any project. `/` is forced
-dynamic for the same reason — with no env at build time Next would otherwise
-prerender it and skip the signed-in redirect.
+Vercel imports the GitHub repo, builds it with `npm run build` on every push
+to `main` (which runs the unit test project before `next build`, so a red
+invariant fails the deploy), and turns each route into a function sized by
+that route's `maxDuration`. The five environment variables live in the
+project's settings.
 
-**A local `next build` is not the production shape.** Next inlines every
-`NEXT_PUBLIC_*` variable it can see at build time, and a build run in this
-checkout sees `.env.local`, so the server bundle it produces carries those
-values and ignores the runtime environment. The Docker build never sees a
-`.env*` file (`.dockerignore`), which is why the image reads them at start-up.
-Found while trying to point a local build at a dead Supabase: it kept talking
-to the real one. To test anything that depends on the runtime environment,
-build from a copy of the tree with no `.env.local` in it.
+## What you do once, in the Vercel dashboard
 
-Nothing below needs the `gcloud` CLI. `scripts/gcp-setup.sh` and
-`scripts/deploy.sh` do the same from a terminal that has the SDK, if one
-ever exists; `scripts/verify-deploy.sh` is plain curl and works anywhere.
+1. **Import the repo.** vercel.com/new → *Import Git Repository* → connect
+   GitHub if asked → pick `JaiKukreja-7/MockPrep`. Framework preset is
+   detected as Next.js; leave the root directory and build command alone.
+2. **Environment variables** (on the import screen, or later under Project
+   → Settings → Environment Variables). All five, for *Production* — and for
+   *Preview* too if you want preview deployments to work:
 
-The five values you will paste come from `.env.local`:
+   | Name | From `.env.local` |
+   |---|---|
+   | `NEXT_PUBLIC_SUPABASE_URL` | the `https://….supabase.co` URL |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the publishable key |
+   | `GEMINI_API_KEY` | Google AI Studio key |
+   | `GROQ_API_KEY` | Groq key |
+   | `OPENROUTER_API_KEY` | OpenRouter key |
 
-| Secret name | From `.env.local` |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | the `https://….supabase.co` URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the publishable key |
-| `GEMINI_API_KEY` | Google AI Studio key |
-| `GROQ_API_KEY` | Groq key |
-| `OPENROUTER_API_KEY` | OpenRouter key |
+   The two `NEXT_PUBLIC_` values are inlined into the build. On Vercel that
+   is fine: each environment builds with its own values, so production and
+   preview cannot cross. (This is the same fact that makes a *local* build
+   carry `.env.local` — see the note at the end.)
+3. **Deploy.** The first build takes a few minutes. The URL is on the
+   project page: `https://mockprep-<hash>.vercel.app`, plus the stable
+   `https://<project-name>.vercel.app`.
+4. **Node version** — Settings → General → Node.js Version. The project is
+   developed and tested on 24; pick 24.x if offered, otherwise 22.x runs it
+   (nothing in the app needs 24-only APIs; only the local scripts do).
+5. **Function region** — Settings → Functions → Function Region: the one
+   nearest your Supabase project. Every request talks to Supabase; the
+   round trip is the latency you will feel.
+6. **Fluid compute** is on by default for new projects; leave it on. The
+   `maxDuration` values below need it — without it the Hobby plan caps
+   functions at 60 seconds and the deploy is refused.
 
-The first two are publishable, not secret, but they live in Secret Manager
-too so there is exactly one mechanism and nothing to bake into the image.
+From now on every push to `main` builds and deploys; pull requests get
+preview deployments.
 
-## 1. Project and billing
+## Function durations
 
-console.cloud.google.com → project picker in the top bar → **New project**
-→ name it → **Create**. Then ☰ → **Billing** → **Link a billing account**.
-Cloud Run will not create a service without one, even inside the free tier.
+A server action runs under the segment config of the page that posts it, so
+the limits are on the pages, not in the actions:
 
-## 2. Secrets — five times
+| Route | `maxDuration` | Why |
+|---|---|---|
+| `/dashboard` | 120 s | `startRound` — question generation can walk the 1/2/4/8 s backoff ladder on one provider, then fail over |
+| `/session/[id]` | 120 s | `submitAnswer` / `scoreRound` — scoring and flag extraction in parallel, each with the ladder; 30 s has been seen |
+| `/report/[id]` | 120 s | `scoreRound` from the unscored report |
+| `/resume` | 120 s | extraction of a 4 MB PDF plus the audit |
+| `/api/voice/turn` | 300 s | Whisper, the bridge line, and on the last turn the whole scoring pipeline |
 
-☰ → **Security** → **Secret Manager** → **Enable** the API if prompted →
-**Create secret**. For each row of the table:
+300 s is the ceiling on Hobby and Pro with Fluid compute. Everything else
+stays on the default.
 
-- **Name**: exactly the secret name from the table. The service maps each
-  one to the environment variable of the same name.
-- **Secret value**: paste the value from `.env.local` — the value only, no
-  quotes, no trailing newline.
-- Leave replication, rotation and expiry alone. **Create secret**.
+## pdfjs on Vercel — confirmed by trace
 
-## 3. The service
+`pdfjs-dist` and `mammoth` are `serverExternalPackages`, so they are loaded
+from `node_modules` at runtime rather than bundled. Vercel builds each
+function from Next's output file trace, and the trace for `/resume` did
+**not** include `pdf.worker.mjs`: in Node, pdfjs loads its worker with a
+runtime `import("./pdf.worker.mjs")` the tracer cannot see, so every upload
+would have failed with *Setting up fake worker failed*. `next.config.ts`
+pins the file with `outputFileTracingIncludes` for `/resume`. Verified two
+ways: the `.nft.json` for the route now lists the worker, and a PDF parsed
+from the standalone output's `node_modules` alone — assembled from those
+same traces — reads correctly. (The same fix applies to the Docker path,
+which had the latent gap too.)
 
-☰ → **Cloud Run** → **Create service**. Enable the API if prompted.
+## After the first deploy: Supabase
 
-Under **Source**, choose **Continuously deploy from a repository (source or
-function)** → **Set up with Cloud Build**:
+Supabase dashboard → **Authentication** → **URL Configuration**:
 
-- **Repository provider**: GitHub. **Authenticate** in the popup; install
-  the *Google Cloud Build* GitHub app when asked and grant it
-  `JaiKukreja-7/MockPrep`. If the repo is not in the list, **Manage
-  connected repositories** and add it. Select it, tick the consent box,
-  **Next**.
-- **Branch**: `^main$` (the default).
-- **Build Type**: **Dockerfile**.
-- **Source location**: `/Dockerfile`. Leave the build context at `/`.
-- **Save**.
-
-Back on the form:
-
-- **Service name**: `mockprep`.
-- **Region**: the one nearest your Supabase project (Supabase dashboard →
-  Project Settings → General shows its region).
-- **Authentication**: **Allow unauthenticated invocations**. The app does
-  its own auth; Cloud Run has to let the public in.
-- **Billing**: Request-based.
-- **Service scaling**: minimum instances `0`; expand it and set maximum
-  instances `2`.
-- **Ingress**: All.
-
-Expand **Container(s), volumes, networking, security**:
-
-- **Container port**: `8080`. The Dockerfile sets `PORT=8080` and Cloud Run
-  sends the same value, so the server binds the right port either way.
-- **Resources**: Memory `1 GiB`, CPU `1`. pdfjs holds a 4 MB PDF in memory
-  while it reads it; 512 MiB is too tight.
-- **Requests**: Request timeout `300` seconds. Maximum concurrent requests
-  per instance `20` — the in-process LLM queue runs two provider calls at
-  a time, so more requests per instance would only wait longer.
-- **Variables & Secrets** tab → **Reference a secret**, five times:
-  - **Secret**: pick it from the list.
-  - **Reference method**: **Exposed as environment variable**.
-  - **Name**: the same name as the secret, e.g. `GEMINI_API_KEY`.
-  - **Version**: `latest`.
-  - If a yellow bar says the service account lacks access, click **Grant**
-    on it. That gives the Compute Engine default service account — what the
-    service runs as — *Secret Manager Secret Accessor*. Without it the
-    first revision fails to start with a permissions error on the secret.
-- Security and Networking stay default.
-
-**Create**. The first build takes a few minutes; watch it on the service's
-**Revisions** tab or ☰ → **Cloud Build** → **History**. When the revision
-goes green the URL is at the top of the service page:
-`https://mockprep-<number>.<region>.run.app`.
-
-From now on every push to `main` builds and deploys. That is the whole
-release process. The image build runs the unit test project before
-`next build` (`npm run build` is `npm run test:unit && next build`), so a
-red invariant fails the deploy; the integration and design-audit projects
-run in GitHub Actions (`.github/workflows/ci.yml`) and need the two public
-Supabase variables as repository secrets.
-
-## 4. Supabase — tell it about the new origin
-
-Magic links and the auth callback land on the production origin, and
-Supabase only follows redirects it has been told about. Supabase dashboard
-→ **Authentication** → **URL Configuration**:
-
-- **Site URL**: the service URL.
-- **Redirect URLs** → **Add URL**: `https://<service-url>/auth/callback`.
-  Keep `http://localhost:3000/auth/callback` for development.
+- **Site URL**: the production URL.
+- **Redirect URLs** → add `https://<production-domain>/auth/callback`. Keep
+  `http://localhost:3000/auth/callback` for development. For preview
+  deployments add the wildcard
+  `https://*-<your-vercel-team>.vercel.app/auth/callback` (the team slug is
+  in every preview URL).
 
 Until this is done, sign-in emails link back to localhost.
 
-## 5. Verify
-
-Plain bash and curl:
+## Verify
 
 ```bash
-scripts/verify-deploy.sh https://mockprep-<number>.<region>.run.app
+scripts/verify-deploy.sh https://<production-domain>
 ```
 
 Twelve checks from outside: the landing page serves, every private route
-redirects to sign-in, the API returns a JSON 401 without a session, the
-screenshots and the image optimiser work, HTTP redirects to HTTPS.
+redirects to sign-in, the API answers a JSON 401 without a session, the
+screenshots and the image optimiser work, HTTP redirects to HTTPS (Vercel
+answers 308).
 
-**The quota cap** cannot be checked from outside — it needs a signed-in
-round. On the live URL, sign in (or *Try a round as a guest*), start a text
-round, then open **Settings**: the usage line should read one used against
-the cap. The cap is `consume_llm_quota` in Postgres under a row lock, so it
-holds across instances by construction; this confirms the deployed instance
-is calling it. If the function were missing the round would fail with a 500
-rather than run uncapped — `lib/llm/quota.ts` throws in production.
+**The quota cap** needs a signed-in round: sign in (or *Try a round as a
+guest*), start a text round, open **Settings** — one used against the cap.
+The cap is `consume_llm_quota` in Postgres under a row lock, so it holds
+across function instances by construction.
 
-**Fail-closed on the real service** (optional): on the service page, **Edit
-& deploy new revision** → **Variables & Secrets** → remove all five secret
-references → untick **Serve this revision immediately** → **Deploy**. Live
-traffic stays on the good revision. On the **Revisions** tab open the new
-revision; its own address is shown there
-(`https://<revision>---mockprep-<…>.run.app`). Every route on it should be a
-500 and its **Logs** should show *Supabase environment variables are
-missing in production*. Then delete that revision from the Revisions tab
-(⋮ → **Delete**). Traffic was never on it.
+**Fail-closed**: with the two Supabase variables removed from an
+environment, every route answers 500 with *Supabase environment variables
+are missing in production* (the proxy refuses to serve). Test it on a
+preview environment, never production.
 
-## Sizing, and what is not yet production-grade
+**During a Supabase outage** the proxy serves `/unavailable` for private
+pages, a JSON 503 for the API, and sets `x-mockprep-outage: 1` on every
+response, so monitoring can tell "MockPrep is down" from "MockPrep cannot
+reach its database".
 
-- 1 vCPU, 1 GiB, concurrency 20, 0–2 instances, 300 s timeout. Scale to
-  zero means the first request after a quiet spell takes a few seconds.
+## What is not yet production-grade
+
 - The LLM queue (`lib/llm/queue.ts`, two calls at a time with backoff) is
-  per instance. Two instances means up to four concurrent provider calls,
-  inside every free tier's rate limit. Raise the maximum only with that in
-  mind.
-- The stale-round sweep runs on read, not on a schedule; nothing here needs
-  Cloud Scheduler yet.
-- Logs: the service page → **Logs** tab.
+  per function instance. Vercel scales instances freely, so the effective
+  concurrency against each free tier is unbounded under load. A shared
+  limiter (Upstash, or the providers' own quotas) is the fix if that ever
+  bites.
+- The stale-round sweep runs on read, not on a schedule. Vercel Cron could
+  call a route for it; nothing needs it yet.
+- Logs: the project's **Logs** tab; the proxy's outage line and every
+  `[mockprep]` line from `describeLlmFailure` land there.
+
+## A local `next build` is not the production shape
+
+Next inlines every `NEXT_PUBLIC_*` variable it can see at build time, and a
+build run in this checkout sees `.env.local`, so the server bundle it
+produces carries those values and ignores the runtime environment. Found
+while trying to point a local build at a dead Supabase: it kept talking to
+the real one. To test anything that depends on the runtime environment,
+build from a copy of the tree with no `.env.local` in it.
+
+## The previous path: Cloud Run
+
+`Dockerfile`, `.dockerignore`, `scripts/gcp-setup.sh` and `scripts/deploy.sh`
+still describe a working Cloud Run deployment (secrets from Secret Manager
+at start-up, nothing baked). `output: "standalone"` in `next.config.ts` is
+for that path; Vercel ignores it. Nothing here depends on it.

@@ -6,6 +6,11 @@ import { UploadForm } from "./upload-form";
 
 export const metadata = { title: "Resume — MockPrep" };
 
+// Vercel: a server action runs under the segment config of the page that
+// posts it, so the limit for analyseResumeUpload lives here. Extraction of a 4MB PDF plus a full audit, with the same ladder behind it.
+// The platform default would cut it off.
+export const maxDuration = 120;
+
 export default async function ResumePage() {
   const analyses = await getAnalyses();
   if (!analyses) redirect("/sign-in?next=/resume");

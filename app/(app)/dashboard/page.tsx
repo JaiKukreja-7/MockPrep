@@ -14,6 +14,12 @@ export const metadata = {
   title: "Dashboard — MockPrep",
 };
 
+// Vercel: a server action runs under the segment config of the page that
+// posts it, so the limit for startRound lives here. Question generation can walk the 1/2/4/8s ladder on one provider and
+// then fail over to another before it answers.
+// The platform default would cut it off.
+export const maxDuration = 120;
+
 const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
 
 const breakdownRows = [

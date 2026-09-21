@@ -39,7 +39,9 @@ check "  …as JSON, not a sign-in page"   yes "$(curl -s -X POST "$URL/api/voic
 check "GET /sign-in"                     200 "$(status "$URL/sign-in")"
 check "GET /landing/session.png"         200 "$(status "$URL/landing/session.png")"
 check "GET /_next/image (optimiser)"     200 "$(status "$URL/_next/image?url=%2Flanding%2Fsession.png&w=1920&q=75")"
-check "HTTP → HTTPS"                     301 "$(status "${URL/https:/http:}/")"
+# Vercel answers 308, Cloud Run's front end 301; both are a permanent redirect.
+http_status="$(status "${URL/https:/http:}/")"
+check "HTTP → HTTPS (301 or 308)"          "redirect" "$([[ "$http_status" == 301 || "$http_status" == 308 ]] && echo redirect || echo "$http_status")"
 
 echo
 if [[ $fail -eq 0 ]]; then echo "All checks passed."; else echo "$fail check(s) failed."; fi

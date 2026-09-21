@@ -14,6 +14,16 @@ const nextConfig: NextConfig = {
   // they are required from node_modules at runtime, which is how they expect
   // to resolve their own internals.
   serverExternalPackages: ["pdfjs-dist", "mammoth"],
+
+  // Vercel builds each route's function from Next's output file trace. pdfjs
+  // is external (above), and in Node it loads its worker with a runtime
+  // `import("./pdf.worker.mjs")` that the tracer cannot see — so the file
+  // was absent from the /resume function and every upload would have failed
+  // with "Setting up fake worker failed". The resume upload is a server
+  // action posted to /resume, so that is the route that needs it.
+  outputFileTracingIncludes: {
+    "/resume": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+  },
   experimental: {
     serverActions: {
       // Resume uploads are capped at 4MB in lib/resume/extract.ts. The limit

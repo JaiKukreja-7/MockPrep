@@ -8,6 +8,9 @@ import { interviewerTurn } from "@/lib/llm/tasks/interviewer-turn";
 import { scoreSession } from "@/lib/rounds/score";
 import type { VoiceTurnResult } from "@/lib/voice/transport";
 
+// Whisper, the interviewer's bridge line and — on the last turn — the whole
+// scoring pipeline, each with a backoff ladder behind it. 300 is the Vercel
+// ceiling with Fluid compute on the Hobby and Pro plans.
 export const maxDuration = 300;
 
 /** Hard ceiling for one round, enforced here and not in the browser. */

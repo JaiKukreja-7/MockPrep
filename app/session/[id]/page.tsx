@@ -7,6 +7,12 @@ import { LiveRound } from "./live-round";
 
 export const metadata = { title: "Live session — MockPrep" };
 
+// Vercel: a server action runs under the segment config of the page that
+// posts it, so the limit for submitAnswer and scoreRound lives here. Scoring runs answer scoring and flag extraction in parallel, and each may
+// spend the backoff ladder before failing over; 30s has been seen.
+// The platform default would cut it off.
+export const maxDuration = 120;
+
 export default async function SessionPage({ params }: PageProps<"/session/[id]">) {
   const { id } = await params;
   // Before reading: a live round left for an hour is swept here, so it can

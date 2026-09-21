@@ -248,6 +248,24 @@ it loads cleanly with Groq as the only leg.
 by Turbopack, pdfjs falls back to a fake worker whose `pdf.worker.mjs` import
 cannot resolve, and every PDF fails with "Setting up fake worker failed".
 
+### Vercel (2026-09-21)
+
+Target moved from Cloud Run to Vercel. `maxDuration` on every route that
+reaches an LLM or Whisper — on the *pages* that host the server actions,
+since an action runs under its page's segment config: `/dashboard`,
+`/session/[id]`, `/report/[id]`, `/resume` at 120 s; `/api/voice/turn` at
+300 s (the Fluid-compute ceiling). Scoring has been seen at 30 s.
+
+Found while confirming pdfjs: the `/resume` function's output file trace did
+not include `pdf.worker.mjs`, which pdfjs loads in Node with a runtime
+`import()` the tracer cannot see. On Vercel every resume upload would have
+failed with "Setting up fake worker failed" — and the Docker standalone had
+the same gap, untested because an upload needs an account. Fixed with
+`outputFileTracingIncludes` for `/resume`; verified in the `.nft.json` and
+by parsing a fixture from the standalone bundle's `node_modules` alone.
+`verify-deploy.sh` accepts Vercel's 308 for HTTP→HTTPS. `DEPLOY.md`
+rewritten for Vercel, with the Cloud Run path kept as a footnote.
+
 ### Error-state audit and fixes (step 14, 2026-09-16)
 
 Eight failure paths, exercised rather than reasoned about — the server ones
@@ -839,13 +857,12 @@ no longer be corrected through the API — needs a SQL console.
    `supabase/migrations/20260916000000_delete_own_guest.sql` and
    `supabase/migrations/20260916010000_refund_llm_quota.sql`. The
    integration project is red until both are in.
-2. **Go live.** Follow `DEPLOY.md` — the console path, click by click: a
-   GitHub-connected Cloud Run service (repo `JaiKukreja-7/MockPrep`, branch
-   `^main$`, build type Dockerfile) with the five values referenced from
-   Secret Manager on the Variables & Secrets tab. No SDK: this machine has
-   1.3 GB free and cannot take it. Then add the service URL to Supabase →
-   Authentication → URL Configuration, run `scripts/verify-deploy.sh <url>`
-   (plain curl), and one signed-in round to see the cap count on Settings.
+2. **Go live on Vercel.** Follow `DEPLOY.md`: import `JaiKukreja-7/MockPrep`,
+   set the five environment variables, deploy, pick the function region
+   nearest Supabase, then add the domain to Supabase → Authentication → URL
+   Configuration, run `scripts/verify-deploy.sh <url>`, and one signed-in
+   round to see the cap count on Settings. (Cloud Run was the first target;
+   its Dockerfile and scripts still work and stay in the repo.)
 3. **Close the barge-in item before deploy** — see Blocked #2. Still open;
    the deploy above ships the parked detector as is.
 4. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for

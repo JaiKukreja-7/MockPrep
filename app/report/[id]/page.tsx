@@ -6,6 +6,12 @@ import { ScoreRetry } from "@/app/session/[id]/score-retry";
 
 export const metadata = { title: "Scored report — MockPrep" };
 
+// Vercel: a server action runs under the segment config of the page that
+// posts it, so the limit for scoreRound lives here. The unscored report's "Score this round" runs the same scoring as the
+// session page.
+// The platform default would cut it off.
+export const maxDuration = 120;
+
 const FLAG_LABELS: Record<string, string> = {
   filler: "Filler",
   restated: "Restated",
