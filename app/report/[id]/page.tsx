@@ -67,7 +67,7 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
           <h1 className="eyebrow truncate">Scored report</h1>
         </div>
         <div className="flex shrink-0 items-center gap-6">
-          <Link href="/dashboard" className="eyebrow hidden sm:block">
+          <Link href="/dashboard" className="link eyebrow hidden sm:block">
             Back to dashboard
           </Link>
           <Link href="/dashboard">

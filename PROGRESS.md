@@ -337,6 +337,47 @@ Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
 holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
 here until that is closed.
 
+### Subtle motion (step 17, 2026-09-22)
+
+Tokens first: `--motion-fast` 150ms, `--motion-slow` 400ms, one curve
+`--motion-ease` (`cubic-bezier(0.2, 0, 0, 1)`), in both the `:root` block
+and `@theme` (as `--ease-standard`; the stock easing scale is deleted so
+`ease-in-out` cannot be typed). Every transition in `globals.css`
+references them; there are no literal durations left outside the speaker.
+
+- **Hover and focus.** Buttons and pills transition background, colour and
+  border only; a pill inside a link (the track filters) takes the button's
+  flat swap. A ruled row that contains a link darkens its 1px rule to the
+  text colour (`.row:has(a):hover`). Text links carry `.link`: a 2px bar
+  grows in from the left under the pointer or keyboard focus, drawn 2px
+  under the line box so tap-target padding does not push it down. Focus is
+  the same accent ring as before, but it is always present (transparent,
+  flush) and settles to accent + 2px offset in `--motion-fast`.
+- **Scroll reveal, landing only.** Sections marked `data-reveal=""` render
+  visible; `app/reveal.tsx` marks only those below the viewport "pending"
+  once mounted, an IntersectionObserver marks each "in" as it enters and
+  unobserves it, so nothing replays. Items marked `data-reveal-item`
+  stagger within their section in three tiers (0 / 40 / 80ms) — the last
+  lands 480ms after the first starts. No JS: nothing hidden. Reduced
+  motion: the observer marks nothing.
+- **Reduced motion, globally.** `transition-duration: 0s` and
+  `animation-duration: 0s` on everything, `!important`; reveals pinned
+  visible. Hover states still land on the same end state, instantly.
+- **Audit.** `design-audit.test.ts` reads `--motion-slow` from the sheet
+  and fails any transition or animation longer than it, any transition
+  whose duration plus delay passes 500ms, and any looping animation —
+  on elements and their pseudo-elements. The self-test plants one of each.
+  Two more cases on `/`: no-JS shows everything and a below-fold section
+  reveals once and never replays; under `reducedMotion: "reduce"` every
+  duration is 0s, every reveal is at opacity 1, and the observer has
+  marked nothing, at all three widths.
+
+Exempt from the loop and length rules, by class: the speaker's four state
+animations (`.speaker-*`, 1.1–1.4s) and the `animate-pulse` dot on pending
+states. Both are status indicators, not decoration, and both already stop
+under reduced motion. Removing them would leave "thinking" with no signal;
+flagged rather than decided.
+
 ### Tailored rounds (step 16, 2026-09-22)
 
 The start form has an optional "Tailor this round" section: a resume

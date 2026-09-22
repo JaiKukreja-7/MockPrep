@@ -43,7 +43,7 @@ export function AppNav({ counts }: AppNavProps) {
                 // py-3 on the strip lifts a 22px text link to a 46px tap
                 // target; lg:py-0 hands the vertical rhythm back to the
                 // column's gap.
-                "flex items-center justify-between gap-4 whitespace-nowrap py-3 text-u-body lg:py-0",
+                "link flex items-center justify-between gap-4 whitespace-nowrap py-3 text-u-body lg:py-0",
                 current ? "font-medium" : "font-normal",
               ].join(" ")}
             >

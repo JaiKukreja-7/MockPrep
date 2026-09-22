@@ -186,7 +186,7 @@ export function LiveRound({ view }: { view: SessionView }) {
                   {state.signIn ? (
                     <>
                       {" "}
-                      <Link href="/sign-in" target="_blank" rel="noopener" className="font-medium">
+                      <Link href="/sign-in" target="_blank" rel="noopener" className="link font-medium">
                         Sign in in a new tab
                       </Link>
                     </>

@@ -108,12 +108,8 @@ export default async function DashboardPage() {
               ) : null}
 
               <p className="mt-10">
-                <a
-                  href={`/report/${recentSessions[0]?.id ?? ""}`}
-                  className="group inline-flex flex-col py-2 text-u-body"
-                >
-                  <span>Read the full report</span>
-                  <span className="link-bar mt-1 w-0 transition-[width] duration-150 group-hover:w-full" />
+                <a href={`/report/${recentSessions[0]?.id ?? ""}`} className="link inline-block py-2 text-u-body">
+                  Read the full report
                 </a>
               </p>
             </>

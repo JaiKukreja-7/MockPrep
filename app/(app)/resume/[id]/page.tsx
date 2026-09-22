@@ -33,7 +33,7 @@ export default async function AnalysisPage({
     <>
       <header className="flex h-[72px] shrink-0 items-center justify-between gap-8 border-b border-b-rule px-8">
         <h1 className="text-u-lg font-medium">Resume check</h1>
-        <Link href="/resume" className="eyebrow">
+        <Link href="/resume" className="link eyebrow">
           All checks
         </Link>
       </header>

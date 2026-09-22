@@ -49,7 +49,7 @@ export function ScoreRetry({ sessionId, why }: { sessionId: string; why?: string
         <Button type="submit" disabled={pending}>
           {pending ? "Scoring…" : "Score this round"}
         </Button>
-        <Link href="/sessions" className="eyebrow">
+        <Link href="/sessions" className="link eyebrow">
           See past rounds
         </Link>
       </div>

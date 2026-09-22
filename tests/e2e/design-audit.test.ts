@@ -18,6 +18,13 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
  *                  honoured and an off-token size is not.
  *   numerics       every numeric readout — an element whose text is digits
  *                  and separators only — has tabular figures.
+ *   motion         no transition or animation, on an element or its
+ *                  pseudo-elements, runs longer than --motion-slow, and a
+ *                  transition's duration plus delay stays under 500ms. The
+ *                  speaker's state animations and the pending-state pulse
+ *                  are status indicators, exempt by class. Under
+ *                  prefers-reduced-motion every duration is 0s and every
+ *                  reveal is at full opacity — checked on the landing page.
  *
  * Routes: the public ones signed out, then every signed-in route as a guest
  * (no credentials needed). Screens that only exist with data — a scored
@@ -147,7 +154,67 @@ function auditPage(): Violation[] {
     if (s.boxShadow !== "none") out.push({ rule: "shadow", element: describe(e), value: s.boxShadow });
   }
 
+  // Motion: the longest token, read from the stylesheet, is the ceiling.
+  const ms = (v: string) => (v.endsWith("ms") ? parseFloat(v) : parseFloat(v) * 1000);
+  const slow = ms(cs(document.documentElement).getPropertyValue("--motion-slow").trim() || "0s");
+  const exemptAnimation = (e: Element) =>
+    e.classList.contains("animate-pulse") || [...e.classList].some((c) => c.startsWith("speaker-"));
+  for (const e of everything) {
+    for (const pseudo of [null, "::before", "::after"] as const) {
+      const s = pseudo ? getComputedStyle(e, pseudo) : cs(e);
+      if (pseudo && s.content === "none") continue;
+      const durations = s.transitionDuration.split(",").map((d) => ms(d.trim()));
+      const delays = s.transitionDelay.split(",").map((d) => ms(d.trim()));
+      durations.forEach((d, i) => {
+        const delay = delays[i] ?? delays[0] ?? 0;
+        if (d > slow) out.push({ rule: "transition longer than a token", element: describe(e) + (pseudo ?? ""), value: s.transitionDuration });
+        else if (d > 0 && d + delay > 500) out.push({ rule: "transition lands after 500ms", element: describe(e) + (pseudo ?? ""), value: `${d}ms + ${delay}ms` });
+      });
+      if (s.animationName !== "none" && !exemptAnimation(e)) {
+        for (const d of s.animationDuration.split(",").map((d) => ms(d.trim()))) {
+          if (d > slow) out.push({ rule: "animation longer than a token", element: describe(e) + (pseudo ?? ""), value: s.animationDuration });
+        }
+        if (s.animationIterationCount.includes("infinite")) {
+          out.push({ rule: "animation loops", element: describe(e) + (pseudo ?? ""), value: s.animationIterationCount });
+        }
+      }
+    }
+  }
+
   // Dedupe identical findings (a list renders the same row many times).
+  const seen = new Set<string>();
+  return out.filter((v) => {
+    const key = `${v.rule}|${v.element}|${v.value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Runs inside the page under prefers-reduced-motion: everything must be off. */
+function auditReducedMotion(): Violation[] {
+  const out: Violation[] = [];
+  const ms = (v: string) => (v.endsWith("ms") ? parseFloat(v) : parseFloat(v) * 1000);
+  for (const e of document.querySelectorAll("body *")) {
+    if (e.closest("nextjs-portal, svg, script, style, template")) continue;
+    for (const pseudo of [null, "::before", "::after"] as const) {
+      const s = pseudo ? getComputedStyle(e, pseudo) : getComputedStyle(e);
+      if (pseudo && s.content === "none") continue;
+      const tag = e.tagName.toLowerCase() + (pseudo ?? "");
+      if (s.transitionDuration.split(",").some((d) => ms(d.trim()) > 0)) {
+        out.push({ rule: "transition under reduced motion", element: tag, value: s.transitionDuration });
+      }
+      if (s.animationName !== "none" && s.animationDuration.split(",").some((d) => ms(d.trim()) > 0)) {
+        out.push({ rule: "animation under reduced motion", element: tag, value: s.animationDuration });
+      }
+    }
+  }
+  for (const e of document.querySelectorAll("[data-reveal], [data-reveal-item]")) {
+    const s = getComputedStyle(e);
+    if (s.opacity !== "1" || (s.translate !== "none" && s.translate !== "0px")) {
+      out.push({ rule: "reveal hidden under reduced motion", element: e.tagName.toLowerCase(), value: `opacity ${s.opacity}, translate ${s.translate}` });
+    }
+  }
   const seen = new Set<string>();
   return out.filter((v) => {
     const key = `${v.rule}|${v.element}|${v.value}`;
@@ -189,6 +256,9 @@ describe("the audit itself", () => {
         add('<p id="v4" style="box-shadow: 0 1px 2px black">shadow</p>');
         add('<p id="v5" style="font-size: 17px">size</p>');
         add('<p id="v6" style="font-variant-numeric: normal">1,234</p>');
+        add('<p id="v7" style="transition: opacity 600ms">slow transition</p>');
+        add('<p id="v8" style="transition: opacity 400ms 200ms">late transition</p>');
+        add('<style>@keyframes planted { to { opacity: 0.5 } }</style><p id="v9" style="animation: planted 900ms infinite">animation</p>');
       });
       const violations = await page.evaluate(auditPage);
       const rules = violations.map((v) => `${v.rule}: ${v.element}`).sort();
@@ -200,8 +270,79 @@ describe("the audit itself", () => {
           'numeric not tabular: p "1,234"',
           'radius: p "radius"',
           'shadow: p "shadow"',
+          'transition longer than a token: p "slow transition"',
+          'transition lands after 500ms: p "late transition"',
+          'animation longer than a token: p "animation"',
+          'animation loops: p "animation"',
         ].sort(),
       );
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+/* --------------------------------------------------------------- motion */
+
+describe("scroll reveal and reduced motion on the landing page", () => {
+  it("nothing is hidden before the observer runs, and a section below the fold reveals once", async () => {
+    const context = await browser.newContext({ javaScriptEnabled: false });
+    const page = await context.newPage();
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(`${baseUrl}/`, { waitUntil: "networkidle" });
+      // No JS: every reveal target is at full opacity, in place.
+      const hidden = await page.evaluate(() =>
+        [...document.querySelectorAll("[data-reveal], [data-reveal-item]")].filter((e) => getComputedStyle(e).opacity !== "1").length,
+      );
+      expect(hidden).toBe(0);
+    } finally {
+      await context.close();
+    }
+
+    const live = await browser.newContext();
+    const livePage = await live.newPage();
+    try {
+      await livePage.setViewportSize({ width: 1440, height: 900 });
+      await livePage.goto(`${baseUrl}/`, { waitUntil: "networkidle" });
+      const states = await livePage.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>("[data-reveal]")].map((e) => e.dataset.reveal),
+      );
+      // The observer has run: below-the-fold sections are pending, none is
+      // hidden that the visitor can see.
+      expect(states).toContain("pending");
+      expect(states.every((s) => s === "pending" || s === "" || s === "in")).toBe(true);
+      const last = livePage.locator("[data-reveal]").last();
+      await last.scrollIntoViewIfNeeded();
+      await expect.poll(() => last.getAttribute("data-reveal")).toBe("in");
+      await expect.poll(() => last.evaluate((e) => getComputedStyle(e).opacity)).toBe("1");
+      // Scroll back up and down again: it stays "in" — never replays.
+      await livePage.evaluate(() => window.scrollTo(0, 0));
+      await livePage.waitForTimeout(200);
+      await last.scrollIntoViewIfNeeded();
+      expect(await last.getAttribute("data-reveal")).toBe("in");
+    } finally {
+      await live.close();
+    }
+  });
+
+  it("under prefers-reduced-motion every transition and animation is off and every reveal is visible", async () => {
+    const context = await browser.newContext({ reducedMotion: "reduce" });
+    const page = await context.newPage();
+    try {
+      for (const width of WIDTHS) {
+        await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
+        await page.goto(`${baseUrl}/`, { waitUntil: "networkidle" });
+        const states = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>("[data-reveal]")].map((e) => e.dataset.reveal),
+        );
+        expect(states.every((s) => s === ""), "the observer must not mark anything").toBe(true);
+        const violations = await page.evaluate(auditReducedMotion);
+        expect(violations, `/ @${width} reduced motion:\n` + violations.map((v) => `  [${v.rule}] ${v.element} → ${v.value}`).join("\n")).toEqual([]);
+      }
+      // And on an app screen, where hover transitions are the only motion.
+      await page.goto(`${baseUrl}/sign-in`, { waitUntil: "networkidle" });
+      expect(await page.evaluate(auditReducedMotion)).toEqual([]);
     } finally {
       await context.close();
     }

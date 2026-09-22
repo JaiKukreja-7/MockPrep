@@ -41,7 +41,7 @@ export default async function SignInPage({
                 We sent a one-time link to {sent}. It expires in an hour.
               </p>
               <p className="mt-2">
-                <a href="/sign-in" className="eyebrow">
+                <a href="/sign-in" className="link eyebrow">
                   Use a different address
                 </a>
               </p>

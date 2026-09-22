@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { Reveal } from "./reveal";
 import { redirect } from "next/navigation";
 import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { signInAsGuest } from "@/app/auth/actions";
@@ -109,7 +110,7 @@ export default async function Home() {
           MockPrep<sup>®</sup>
         </span>
         <div className="flex items-center gap-8">
-          <Link href="/sign-in" className="eyebrow hidden py-3 sm:block">
+          <Link href="/sign-in" className="link eyebrow hidden py-3 sm:block">
             Sign in
           </Link>
           <Link href="/sign-in">
@@ -162,14 +163,15 @@ export default async function Home() {
         {features.map((feature) => (
           <section
             key={feature.title}
+            data-reveal=""
             className="mx-auto w-full max-w-page px-(--gutter) py-24 text-center md:py-36"
           >
-            <p className="eyebrow">{feature.eyebrow}</p>
-            <h2 className="display mt-4 text-d-hero">{feature.title}</h2>
-            <p className="mx-auto mt-10 max-w-3xl text-d-body-lg">
+            <p className="eyebrow" data-reveal-item="">{feature.eyebrow}</p>
+            <h2 className="display mt-4 text-d-hero" data-reveal-item="">{feature.title}</h2>
+            <p className="mx-auto mt-10 max-w-3xl text-d-body-lg" data-reveal-item="">
               {feature.body}
             </p>
-            <figure className="mt-16 overflow-hidden rounded-surface border border-rule">
+            <figure className="mt-16 overflow-hidden rounded-surface border border-rule" data-reveal-item="">
               <Image
                 src={feature.image}
                 alt={feature.alt}
@@ -186,12 +188,13 @@ export default async function Home() {
             The ruled index from the frame: --d-mid titles, a pill each, an
             outline pill beneath. Stacked on a phone for every row, not just
             the ones whose title happens to be long — one behaviour per list. */}
-        <section className="mx-auto w-full max-w-page px-(--gutter) py-24 md:py-36">
+        <section data-reveal="" className="mx-auto w-full max-w-page px-(--gutter) py-24 md:py-36">
           <p className="eyebrow">Round types</p>
           <RuledRowList className="mt-12">
             {roundTypes.map((round) => (
               <RuledRow
                 key={round.title}
+                data-reveal-item=""
                 title={round.title}
                 stackTrailing
                 trailing={<PillTag>{round.tag}</PillTag>}
@@ -209,7 +212,7 @@ export default async function Home() {
         {/* ------------------------------------------------------ Statement
             The black section. Headline and paragraph on the left, the facts
             as ruled rows on the right — the rows invert themselves. */}
-        <section className="surface-dark">
+        <section data-reveal="" className="surface-dark">
           <div className="mx-auto grid w-full max-w-page gap-16 px-(--gutter) py-24 md:py-36 lg:grid-cols-2">
             <div>
               <h2 className="display text-d-hero">No small talk.</h2>
@@ -241,10 +244,10 @@ export default async function Home() {
                 MockPrep<sup>®</sup>
               </span>
               <nav aria-label="Footer" className="flex gap-8">
-                <Link href="/sign-in" className="inline-block py-2 text-d-body">
+                <Link href="/sign-in" className="link inline-block py-2 text-d-body">
                   Sign in
                 </Link>
-                <Link href="/sign-in" className="inline-block py-2 text-d-body">
+                <Link href="/sign-in" className="link inline-block py-2 text-d-body">
                   Start a round
                 </Link>
               </nav>
@@ -272,7 +275,7 @@ export default async function Home() {
           </div>
         </div>
 
-        <div className="bg-accent text-accent-text">
+        <div data-reveal="" className="bg-accent text-accent-text">
           <div className="mx-auto w-full max-w-page px-(--gutter) py-20 md:py-24">
             <p className="display text-d-setpiece">Out</p>
             <div className="mt-10 flex flex-col gap-12 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -284,7 +287,7 @@ export default async function Home() {
                 <ul className="mt-4 grid grid-cols-1 gap-x-12 gap-y-4 text-d-body-lg font-medium sm:grid-cols-2">
                   {whereNext.map((item) => (
                     <li key={item.label}>
-                      <Link href={item.href} className="inline-block py-1">
+                      <Link href={item.href} className="link inline-block py-1">
                         {item.label}
                       </Link>
                     </li>
@@ -295,6 +298,7 @@ export default async function Home() {
           </div>
         </div>
       </footer>
+      <Reveal />
     </>
   );
 }
