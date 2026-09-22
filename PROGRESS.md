@@ -325,9 +325,13 @@ notice negatives break the sliding window; deepest-leaves sum; blocking
 I/O in the scheduler; a read-through catalog cache): **0 of 4 probed**,
 straight to the report, scored 85 / 84 / … under the rubrics. The earlier
 run with weak answers had probed 4 of 4. No tightening was needed; the
-"a solid answer gets no follow-up" rule holds at both ends. Unmeasured:
-the middle — a right approach with no complexity stated — which is where a
-probe is the point.
+"a solid answer gets no follow-up" rule holds at both ends. **Borderline
+answers are untested** — a right approach with the complexity unstated, an
+obvious edge case missed, or the data structure left vague. A first pass at
+adding them (2026-09-21) measured 6/12 probed on the shipped prompt; a
+checklist-style rewrite caught 12/12 but pushed strong answers to 11/30
+then 6/30 probed, and was dropped unmeasured in its final form. The shipped
+prompt is the one measured at 0/30 strong, 30/30 weak.
 
 Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
 holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
