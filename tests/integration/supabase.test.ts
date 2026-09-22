@@ -158,3 +158,36 @@ describe("refund_llm_quota", () => {
     expect((Array.isArray(floor) ? floor[0] : floor)?.used).toBe(0);
   });
 });
+
+describe("a resume-tailored round requires an account (sessions_resume_requires_account)", () => {
+  it("a guest's session may carry job details but not tailored_from_resume", async () => {
+    // The job is the user's target, not their history: a guest may store it.
+    const withJob = await supabase
+      .from("sessions")
+      .insert({ user_id: userId, title: "x", job_title: "Backend engineer", company: "Acme", job_description: "Go, Postgres." })
+      .select("id, tailored_from_resume")
+      .single();
+    if (withJob.error?.code === "PGRST204") {
+      throw new Error(
+        "sessions.job_title is missing — apply supabase/migrations/20260922000000_tailored_rounds.sql.",
+      );
+    }
+    expect(withJob.error).toBeNull();
+    expect(withJob.data?.tailored_from_resume).toBe(false);
+
+    // The resume flag is what the restrictive policy gates, on insert…
+    const { error: insertError } = await supabase
+      .from("sessions")
+      .insert({ user_id: userId, title: "x", tailored_from_resume: true });
+    expect(insertError?.code).toBe("42501");
+
+    // …and on update of an existing row, so a guest cannot flip it after.
+    const { data: flipped, error: updateError } = await supabase
+      .from("sessions")
+      .update({ tailored_from_resume: true })
+      .eq("id", withJob.data!.id)
+      .select("tailored_from_resume");
+    expect(updateError?.code).toBe("42501");
+    expect(flipped ?? []).toEqual([]);
+  });
+});

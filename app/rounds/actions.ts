@@ -7,7 +7,9 @@ import { OUTAGE_MESSAGE } from "@/lib/supabase/outage";
 import { currentUser } from "@/lib/supabase/user";
 import { consumeQuota, refundQuota } from "@/lib/llm/quota";
 import { describeLlmFailure } from "@/lib/llm/user-message";
-import { generateQuestions, type GeneratedQuestion } from "@/lib/llm/tasks/generate-questions";
+import { generateQuestions, type GeneratedQuestion, type Tailoring } from "@/lib/llm/tasks/generate-questions";
+import { generateTailoredQuestions } from "@/lib/llm/tasks/tailored-questions";
+import { extractResume, ResumeExtractionError } from "@/lib/resume/extract";
 import { followUp } from "@/lib/llm/tasks/follow-up";
 import { scoreSession } from "@/lib/rounds/score";
 import type { ExperienceLevel, RoundMode, Track } from "@/lib/supabase/types";
@@ -18,6 +20,9 @@ export interface ActionState {
   error?: string;
 }
 
+/** The job description is stored on the session; this is the most of it that is. */
+const MAX_JD_CHARS = 8_000;
+
 /**
  * Starts a round: generates the questions, writes the session and its rounds,
  * then hands off to the live screen.
@@ -25,6 +30,12 @@ export interface ActionState {
  * The request is charged before generation — the cap is a spend control on
  * provider calls, so someone at the cap must not be able to trigger them —
  * and refunded on every path where no round comes of it.
+ *
+ * A round can be tailored to a resume, a job, or both. The resume is parsed
+ * in memory here and goes nowhere but the sensitive generation task; the
+ * variable holding its text falls out of scope with this function and only
+ * the questions it produced are written. The job details are stored on the
+ * session — they are the user's target, not their history.
  */
 export async function startRound(
   _prev: ActionState,
@@ -59,6 +70,32 @@ export async function startRound(
     return { error: "Voice rounds need an account. Add an email to unlock them." };
   }
 
+  // Tailoring inputs. A resume needs a real account — RLS rejects a guest's
+  // tailored_from_resume session regardless — and is read before the quota
+  // is charged, so a scan that yields nothing costs no request.
+  const file = formData.get("resume");
+  const hasFile = file instanceof File && file.size > 0;
+  const jobTitle = String(formData.get("jobTitle") ?? "").trim();
+  const company = String(formData.get("company") ?? "").trim();
+  const jobDescription = String(formData.get("jobDescription") ?? "").trim().slice(0, MAX_JD_CHARS);
+  const job = jobTitle || jobDescription ? { title: jobTitle, company, description: jobDescription } : undefined;
+
+  if (hasFile && (!profile || profile.is_guest)) {
+    return { error: "Tailoring to a resume needs an account. Add an email to unlock it." };
+  }
+
+  let resumeText: string | undefined;
+  if (hasFile) {
+    try {
+      ({ text: resumeText } = await extractResume(file));
+    } catch (error) {
+      return {
+        error: error instanceof ResumeExtractionError ? error.message : "That file could not be read.",
+      };
+    }
+  }
+  const tailoring: Tailoring | null = resumeText || job ? { resumeText, job } : null;
+
   const quota = await consumeQuota(1);
   if (!quota.allowed) {
     return {
@@ -68,7 +105,9 @@ export async function startRound(
 
   let questions: GeneratedQuestion[];
   try {
-    ({ questions } = await generateQuestions({ track, role, level }));
+    ({ questions } = tailoring
+      ? await generateTailoredQuestions({ track, role, level, tailoring })
+      : await generateQuestions({ track, role, level }));
   } catch (error) {
     await refundQuota(1);
     return {
@@ -89,6 +128,8 @@ export async function startRound(
       level,
       status: "live",
       started_at: new Date().toISOString(),
+      ...(job ? { job_title: job.title || null, company: job.company || null, job_description: job.description || null } : {}),
+      ...(resumeText ? { tailored_from_resume: true } : {}),
     })
     .select("id")
     .single();
@@ -108,6 +149,7 @@ export async function startRound(
       question: q.question,
       question_type: q.type,
       topic: q.topic,
+      ...(q.source ? { source: q.source } : {}),
       asked_at: new Date().toISOString(),
       ...(mode === "voice" ? { mode } : {}),
     })),

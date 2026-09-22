@@ -41,6 +41,20 @@ describe("routing table data-policy assertion", () => {
     const routing = await import("@/lib/llm/routing");
     expect(routing.TASKS.resume_analysis.sensitive).toBe(true);
     expect(routing.TASKS.resume_analysis.chain.map((s) => s.provider)).toEqual(["groq"]);
+    // Tailored questions see the resume too, and are a task of their own so
+    // question_generation's Gemini lead can never be handed one.
+    expect(routing.TASKS.tailored_question_generation.sensitive).toBe(true);
+    expect(routing.TASKS.tailored_question_generation.chain.map((s) => s.provider)).toEqual(["groq"]);
+  });
+
+  it("every task that can see a resume is marked sensitive", async () => {
+    vi.doMock("@/lib/llm/registry", () =>
+      registryWith({ gemini: "private", groq: "private", openrouter: "trains-on-free-tier" }),
+    );
+    const routing = await import("@/lib/llm/routing");
+    for (const task of ["resume_analysis", "tailored_question_generation"] as const) {
+      expect(routing.TASKS[task].sensitive, task).toBe(true);
+    }
   });
 
   it("throws at import, naming the task and the provider, if a sensitive task's provider trains on content", async () => {

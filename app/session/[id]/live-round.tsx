@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { submitAnswer, type ActionState } from "@/app/rounds/actions";
 import { describeSubmitFailure } from "@/lib/client-errors";
-import { TYPE_LABEL } from "@/lib/question-types";
+import { SOURCE_LABEL, TYPE_LABEL } from "@/lib/question-types";
 import type { SessionView } from "@/lib/data/session";
 import { ScoreRetry } from "./score-retry";
 import { VoiceRound } from "./voice-round";
@@ -118,6 +118,7 @@ export function LiveRound({ view }: { view: SessionView }) {
                   `Question ${Math.min(answered + 1, rounds.length)} of ${rounds.length}`,
                   TYPE_LABEL[current.type],
                   current.topic,
+                  current.source ? SOURCE_LABEL[current.source] : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")

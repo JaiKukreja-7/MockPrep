@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { getReport } from "@/lib/data/session";
 import { ScoreRetry } from "@/app/session/[id]/score-retry";
-import { TYPE_LABEL } from "@/lib/question-types";
+import { SOURCE_LABEL, TYPE_LABEL } from "@/lib/question-types";
 import { RUBRIC_LABEL } from "@/lib/question-rubric";
 
 export const metadata = { title: "Scored report — MockPrep" };
@@ -48,6 +48,14 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
         new Date(session.started_at),
       )
     : null;
+  // "your resume and the Backend engineer role at Acme" — whichever inputs
+  // the round was tailored to.
+  const jobLabel = session.job_title
+    ? `the ${session.job_title} role${session.company ? ` at ${session.company}` : ""}`
+    : session.company
+      ? `the role at ${session.company}`
+      : null;
+  const tailoredTo = [session.tailored_from_resume ? "your resume" : null, jobLabel].filter(Boolean).join(" and ") || null;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -96,6 +104,12 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                     <>
                       {" "}
                       <span aria-hidden>·</span> <time>{length}</time>
+                    </>
+                  ) : null}
+                  {tailoredTo ? (
+                    <>
+                      {" "}
+                      <span aria-hidden>·</span> Tailored to {tailoredTo}
                     </>
                   ) : null}
                 </p>
@@ -163,6 +177,12 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                           <>
                             {" "}
                             <span aria-hidden>·</span> {round.topic}
+                          </>
+                        ) : null}
+                        {round.source ? (
+                          <>
+                            {" "}
+                            <span aria-hidden>·</span> {SOURCE_LABEL[round.source]}
                           </>
                         ) : null}
                         {round.followUp ? (

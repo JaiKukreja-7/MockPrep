@@ -88,6 +88,55 @@ export function StartRound({
         </Button>
       </div>
 
+      {/* Optional. Either input alone tailors the round; both together add a
+          gap question. The level select above is the experience level for a
+          tailored round too — one setting, not two. */}
+      <fieldset className="mt-10 border-t border-t-rule pt-8" disabled={pending}>
+        <legend className="eyebrow float-left mb-6 w-full">Tailor this round · optional</legend>
+
+        <div className="flex flex-wrap items-end gap-6">
+          <label className="flex min-w-64 flex-1 flex-col gap-2">
+            <span className="eyebrow">
+              {isGuest ? "Resume — needs an account" : "Resume — PDF or DOCX"}
+            </span>
+            {/* Questions probe the projects, stack and claims on it. Read in
+                memory and discarded; only the questions are stored. RLS
+                rejects a guest's resume-tailored session regardless. */}
+            <input
+              type="file"
+              name="resume"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              disabled={isGuest}
+              className="input h-auto rounded-surface py-4 text-u-body file:mr-4 file:rounded-pill file:border-0 file:bg-ink file:px-4 file:py-2 file:text-ink-inverse file:text-u-eyebrow"
+            />
+          </label>
+
+          <div className="min-w-48 flex-1">
+            <Input label="Job title" name="jobTitle" placeholder="Backend engineer" />
+          </div>
+          <div className="min-w-48 flex-1">
+            <Input label="Company" name="company" placeholder="Acme" />
+          </div>
+        </div>
+
+        <label className="mt-6 flex flex-col gap-2">
+          <span className="eyebrow">Job description</span>
+          {/* Questions target the stated requirements. Stored on the round. */}
+          <textarea
+            name="jobDescription"
+            rows={6}
+            maxLength={8000}
+            placeholder="Paste the posting"
+            className="input h-auto rounded-surface py-4 leading-normal"
+          />
+        </label>
+
+        <p className="mt-4 text-u-micro">
+          The resume is read in memory and discarded — only the questions it
+          produces are stored. The job details stay on the round.
+        </p>
+      </fieldset>
+
       {pending ? (
         <p className="mt-4 flex items-center gap-3 text-u-body" aria-live="polite">
           <span aria-hidden className="size-2 animate-pulse rounded-pill bg-accent" />

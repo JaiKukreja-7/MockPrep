@@ -7,7 +7,8 @@ export type LLMTask =
   | "flag_extraction"
   | "interviewer_turn"
   | "follow_up"
-  | "resume_analysis";
+  | "resume_analysis"
+  | "tailored_question_generation";
 
 export interface RouteStep {
   provider: ProviderId;
@@ -106,6 +107,17 @@ export const TASKS: Record<LLMTask, TaskConfig> = {
     sensitive: true,
     chain: [{ provider: "groq", model: "openai/gpt-oss-120b" }],
     maxOutputTokens: 6000,
+  },
+
+  // Questions written against a resume and/or a job description. Its own
+  // task, not question_generation with extra input: that one leads with
+  // Gemini, and the resume text in this prompt must never go there. A job
+  // description alone is not personal data, but the same task serves both so
+  // the route does not depend on which inputs happened to be filled.
+  tailored_question_generation: {
+    sensitive: true,
+    chain: [{ provider: "groq", model: "openai/gpt-oss-120b" }],
+    maxOutputTokens: 5000,
   },
 };
 

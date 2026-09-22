@@ -33,6 +33,9 @@ export type QuestionType =
 /** "junior" is the 1–3 years band. */
 export type ExperienceLevel = "intern" | "fresher" | "junior";
 
+/** Where a tailored question came from. See the tailored_rounds migration. */
+export type QuestionSource = "resume" | "job" | "gap";
+
 export type UserRow = {
   id: string;
   email: string | null;
@@ -57,6 +60,12 @@ export type SessionRow = {
   track: Track;
   status: SessionStatus;
   level: ExperienceLevel;
+  /** Tailoring, when the round was started against a job. */
+  job_title: string | null;
+  company: string | null;
+  job_description: string | null;
+  /** Written against an uploaded resume. The resume itself is never stored. */
+  tailored_from_resume: boolean;
   scheduled_for: string | null;
   started_at: string | null;
   ended_at: string | null;
@@ -72,6 +81,8 @@ export type RoundRow = {
   question: string;
   question_type: QuestionType;
   topic: string | null;
+  /** Where a tailored question came from; null for the standard plan. */
+  source: QuestionSource | null;
   /** The one probing follow-up; non-null spends the cap. */
   follow_up: string | null;
   /** Per-round content score under the type's rubric. */
@@ -172,7 +183,7 @@ export interface Database {
         Insert: Writable<
           SessionRow,
           "id" | "created_at",
-          "track" | "status" | "level" | "scheduled_for" | "started_at" | "ended_at" | "duration_seconds"
+          "track" | "status" | "level" | "job_title" | "company" | "job_description" | "tailored_from_resume" | "scheduled_for" | "started_at" | "ended_at" | "duration_seconds"
         >;
         Update: Partial<SessionRow>;
         Relationships: [
@@ -187,7 +198,7 @@ export interface Database {
       };
       rounds: {
         Row: RoundRow;
-        Insert: Writable<RoundRow, "id" | "created_at", "asked_at" | "answered_at" | "mode" | "question_type" | "topic" | "follow_up" | "score" | "score_detail">;
+        Insert: Writable<RoundRow, "id" | "created_at", "asked_at" | "answered_at" | "mode" | "question_type" | "topic" | "source" | "follow_up" | "score" | "score_detail">;
         Update: Partial<RoundRow>;
         Relationships: [
           {
@@ -267,6 +278,7 @@ export interface Database {
       session_status: SessionStatus;
       question_type: QuestionType;
       experience_level: ExperienceLevel;
+      question_source: QuestionSource;
       track: Track;
       speaker: Speaker;
       transcript_flag: TranscriptFlag;

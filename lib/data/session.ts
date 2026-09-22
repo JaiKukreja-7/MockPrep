@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { QuestionType, RoundMode, SessionRow, TranscriptRow } from "@/lib/supabase/types";
+import type { QuestionSource, QuestionType, RoundMode, SessionRow, TranscriptRow } from "@/lib/supabase/types";
 
 export interface RoundView {
   id: string;
@@ -7,6 +7,8 @@ export interface RoundView {
   question: string;
   type: QuestionType;
   topic: string | null;
+  /** Where a tailored question came from; null for the standard plan. */
+  source: QuestionSource | null;
   /** The probing follow-up, once asked. */
   followUp: string | null;
   /** What the round is asking right now: the follow-up if pending, else the question. */
@@ -39,7 +41,7 @@ async function selectRounds(
 ) {
   const full = await supabase
     .from("rounds")
-    .select("id, ordinal, question, answered_at, mode, question_type, topic, follow_up")
+    .select("id, ordinal, question, answered_at, mode, question_type, topic, source, follow_up")
     .eq("session_id", sessionId)
     .order("ordinal", { ascending: true });
 
@@ -60,6 +62,7 @@ async function selectRounds(
         mode: "text" as const,
         question_type: "behavioural" as const,
         topic: null,
+        source: null,
         follow_up: null,
       })) ?? null,
   };
@@ -90,6 +93,7 @@ export async function getSession(id: string): Promise<SessionView | null> {
     question: r.question,
     type: r.question_type ?? "behavioural",
     topic: r.topic ?? null,
+    source: r.source ?? null,
     followUp: r.follow_up ?? null,
     prompt: r.follow_up ?? r.question,
     answered: r.answered_at !== null,
@@ -124,13 +128,17 @@ export interface ReportRound {
   question: string;
   type: QuestionType;
   topic: string | null;
+  source: QuestionSource | null;
   followUp: string | null;
   score: number | null;
   detail: Record<string, number> | null;
 }
 
 export interface ReportView {
-  session: Pick<SessionRow, "id" | "title" | "track" | "status" | "started_at" | "duration_seconds">;
+  session: Pick<
+    SessionRow,
+    "id" | "title" | "track" | "status" | "started_at" | "duration_seconds" | "job_title" | "company" | "tailored_from_resume"
+  >;
   score: { overall: number; structure: number; specificity: number; pace: number } | null;
   transcript: Array<Pick<TranscriptRow, "id" | "at_seconds" | "speaker" | "body" | "flag">>;
   /** Per-question scores under each type's rubric. */
@@ -143,12 +151,12 @@ export async function getReport(id: string): Promise<ReportView | null> {
   const [sessionResult, roundsResult, scoreResult, transcriptResult] = await Promise.all([
     supabase
       .from("sessions")
-      .select("id, title, track, status, started_at, duration_seconds")
+      .select("id, title, track, status, started_at, duration_seconds, job_title, company, tailored_from_resume")
       .eq("id", id)
       .maybeSingle(),
     supabase
       .from("rounds")
-      .select("id, ordinal, question, question_type, topic, follow_up, score, score_detail")
+      .select("id, ordinal, question, question_type, topic, source, follow_up, score, score_detail")
       .eq("session_id", id)
       .order("ordinal", { ascending: true }),
     supabase
@@ -175,6 +183,7 @@ export async function getReport(id: string): Promise<ReportView | null> {
       question: r.question,
       type: r.question_type,
       topic: r.topic,
+      source: r.source,
       followUp: r.follow_up,
       score: r.score,
       detail: r.score_detail,

@@ -337,6 +337,40 @@ Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
 holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
 here until that is closed.
 
+### Tailored rounds (step 16, 2026-09-22)
+
+The start form has an optional "Tailor this round" section: a resume
+(PDF/DOCX) and/or job details (title, company, pasted description). The
+experience level select above serves both — one setting, not two.
+
+- **Slots are replaced, not added**, so a round stays its length (six
+  questions plus follow-ups can outrun the voice cap). A resume probe takes
+  the second slot — engineering keeps one DSA problem — and a job or gap
+  question takes the last, which is system design on engineering and which
+  the job description steers anyway. With both inputs the last slot is the
+  *gap*: a JD requirement the resume does not evidence. `planTailoredRound`
+  and `tailoredSources` in `lib/llm/tasks/generate-questions.ts`.
+- **A new sensitive task**, `tailored_question_generation`, Groq only.
+  `question_generation` leads with Gemini and was not reused; the boot-time
+  guard covers the new task and `tests/unit/routing.test.ts` asserts both
+  resume-seeing tasks are sensitive.
+- **The resume is parsed in memory and dropped.** `startRound` extracts it
+  before charging quota, hands the text to the task, and writes only the
+  questions — each passed through `redactContactDetails` first, in case the
+  model quoted an email or URL off the page. `sessions.tailored_from_resume`
+  is the only trace. Job details are stored on the session (`job_title`,
+  `company`, `job_description`); `rounds.source` records resume / job / gap
+  and the live screen and report show it next to the type.
+- **Guests cannot upload a resume**: the form disables the input, the action
+  refuses it, and `sessions_resume_requires_account` (restrictive RLS,
+  migration `20260922000000_tailored_rounds.sql`) refuses the flag on insert
+  and update — `tests/integration/supabase.test.ts` proves both.
+- Verified end to end on localhost with a real resume and a frontend
+  internship JD: the resume question named a project actually on the
+  resume, the gap question targeted a JD requirement the resume did not
+  show, and the stored session and rounds carried nothing from the contact
+  line.
+
 ### Vercel (2026-09-21)
 
 Target moved from Cloud Run to Vercel. `maxDuration` on every route that

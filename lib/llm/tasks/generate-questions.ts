@@ -1,7 +1,7 @@
 import "server-only";
 import { runTask } from "../index";
 import { parseJson } from "../json";
-import type { ExperienceLevel, QuestionType, Track } from "@/lib/supabase/types";
+import type { ExperienceLevel, QuestionSource, QuestionType, Track } from "@/lib/supabase/types";
 
 /* ---------------------------------------------------------------------------
    THE PLAN — what kinds of question a round asks, per track.
@@ -29,6 +29,19 @@ export const DSA_TOPICS: Record<ExperienceLevel, string[]> = {
 };
 
 export const CS_TOPICS = ["operating systems", "DBMS", "networks", "OOP"] as const;
+
+/**
+ * The types a tailored slot may take, per track. A tailored question is
+ * written to a resume or a job rather than to a slot in the plan, so the
+ * model picks its type — but only from the track's own kinds, and the first
+ * one listed is the fallback when it picks something else.
+ */
+export const TRACK_TYPES: Record<Track, QuestionType[]> = {
+  engineering: ["cs_fundamentals", "system_design", "behavioural", "dsa"],
+  consulting: ["case", "behavioural"],
+  product: ["product_sense", "behavioural"],
+  general: ["behavioural"],
+};
 
 export const LEVEL_BRIEF: Record<ExperienceLevel, string> = {
   intern:
@@ -93,12 +106,56 @@ export interface GeneratedQuestion {
   type: QuestionType;
   topic: string | null;
   question: string;
+  /** Where a tailored question came from; null for the standard plan. */
+  source: QuestionSource | null;
 }
 
 /** One slot of the plan, with its topic drawn where the type has topics. */
 export interface PlannedSlot {
   type: QuestionType;
   topic: string | null;
+  /** Set on the extra slots a tailored round appends; null on the plan's own. */
+  source: QuestionSource | null;
+}
+
+/** What a tailored round is written against. Either, or both. */
+export interface Tailoring {
+  /** Extracted in memory by the caller and dropped after the call. */
+  resumeText?: string;
+  job?: { title: string; company: string; description: string };
+}
+
+const SOURCE_BRIEF: Record<QuestionSource, string> = {
+  resume:
+    "written to the RESUME: pick one specific project, technology or claim " +
+    "on it and probe it the way an interviewer who has read the resume would " +
+    "— what they built, what they personally did, why that choice, what " +
+    "broke. Name the project or claim in the question.",
+  job:
+    "written to the JOB: take one stated requirement or responsibility from " +
+    "the description and ask a question that tests it directly. Name the " +
+    "requirement in the question.",
+  gap:
+    "a GAP question: a requirement in the job description that the resume " +
+    "does not evidence. Say plainly that the resume does not show it and ask " +
+    "how they would approach it, or what they know of it — an interviewer " +
+    "checking a gap, not a trick.",
+};
+
+/**
+ * The slots a tailored round rewrites. One per input; with both, the second
+ * is the gap question rather than a plain job question, because the job also
+ * steers the plan's own fundamentals and design slots (see
+ * buildQuestionPrompt) and a gap is the one thing only both inputs together
+ * can ask.
+ */
+export function tailoredSources(tailoring: Tailoring): QuestionSource[] {
+  const hasResume = Boolean(tailoring.resumeText?.trim());
+  const hasJob = Boolean(tailoring.job?.description.trim() || tailoring.job?.title.trim());
+  if (hasResume && hasJob) return ["resume", "gap"];
+  if (hasResume) return ["resume"];
+  if (hasJob) return ["job"];
+  return [];
 }
 
 /** Draws `n` distinct entries from `pool`. */
@@ -120,7 +177,57 @@ export function planRound(track: Track, level: ExperienceLevel, random = Math.ra
   return plan.map((type) => ({
     type,
     topic: type === "dsa" ? (dsaTopics.shift() ?? null) : type === "cs_fundamentals" ? (csTopics.shift() ?? null) : null,
+    source: null,
   }));
+}
+
+/**
+ * The track's plan with the tailored slots swapped in — not appended, so a
+ * round stays its length: six questions plus follow-ups can run past the
+ * voice cap before the round ends. A resume probe takes the second slot
+ * (engineering: the second DSA problem, so one stays); a job or gap question
+ * takes the last (engineering: system design, which the job steers anyway).
+ */
+export function planTailoredRound(
+  track: Track,
+  level: ExperienceLevel,
+  tailoring: Tailoring,
+  random = Math.random,
+): PlannedSlot[] {
+  const plan = planRound(track, level, random);
+  for (const source of tailoredSources(tailoring)) {
+    const at = source === "resume" ? 1 : plan.length - 1;
+    plan[at] = { type: TRACK_TYPES[track][0], topic: null, source };
+  }
+  return plan;
+}
+
+/** Caps on what goes into the prompt. The resume is already capped by extraction. */
+const MAX_JD_CHARS = 8_000;
+
+function tailoringBlock(tailoring: Tailoring): string {
+  const parts: string[] = [];
+  const job = tailoring.job;
+  if (job && (job.description.trim() || job.title.trim())) {
+    parts.push(
+      `THE JOB:\n` +
+        `Title: ${job.title.trim() || "(not given)"}\n` +
+        `Company: ${job.company.trim() || "(not given)"}\n` +
+        `Description:\n${job.description.trim().slice(0, MAX_JD_CHARS) || "(not given)"}`,
+    );
+  }
+  if (tailoring.resumeText?.trim()) {
+    parts.push(`THE RESUME:\n${tailoring.resumeText.trim()}`);
+  }
+  if (parts.length === 0) return "";
+  return (
+    `This round is tailored. ` +
+    (job ? `Ground the fundamentals and design questions in the stack and the responsibilities the job names; ` : "") +
+    (tailoring.resumeText ? `where the resume shows a stack, prefer it for examples. ` : "") +
+    `DSA problems stay general. Never quote a phone number, email address or URL from the resume.\n\n` +
+    parts.join("\n\n") +
+    "\n\n"
+  );
 }
 
 /** The prompt, built from the plan. Exported so its structure can be asserted. */
@@ -129,12 +236,14 @@ export function buildQuestionPrompt(input: {
   role: string;
   level: ExperienceLevel;
   plan: PlannedSlot[];
+  tailoring?: Tailoring;
 }): { system: string; user: string } {
-  const { track, role, level, plan } = input;
+  const { track, role, level, plan, tailoring } = input;
   const slots = plan
-    .map(
-      (slot, i) =>
-        `${i + 1}. type "${slot.type}"${slot.topic ? ` on ${slot.topic}` : ""}: ${TYPE_BRIEF[slot.type]}`,
+    .map((slot, i) =>
+      slot.source
+        ? `${i + 1}. type one of ${TRACK_TYPES[track].map((t) => `"${t}"`).join(", ")}: ${SOURCE_BRIEF[slot.source]}`
+        : `${i + 1}. type "${slot.type}"${slot.topic ? ` on ${slot.topic}` : ""}: ${TYPE_BRIEF[slot.type]}`,
     )
     .join("\n");
 
@@ -146,6 +255,7 @@ export function buildQuestionPrompt(input: {
       `Write ${plan.length} interview questions, in this order, for a candidate ` +
       `interviewing for "${role}" in ${TRACK_CONTEXT[track]}.\n\n` +
       `Pitch every question at ${LEVEL_BRIEF[level]}\n\n` +
+      (tailoring ? tailoringBlock(tailoring) : "") +
       `The questions, in order:\n${slots}\n\n` +
       `Rules:\n` +
       `- Each question is what a real interviewer would say aloud: one to ` +
@@ -181,7 +291,17 @@ export async function generateQuestions({
     ...prompt,
   });
 
-  const parsed = parseJson<{ questions?: unknown }>(result.text);
+  const questions = parseQuestions(result.text, plan, track);
+  return { questions, provider: `${result.provider}/${result.model}` };
+}
+
+/**
+ * The model's output against the plan. On the plan's own slots the plan's
+ * type wins; on a tailored slot the model chooses, within the track's types.
+ * Throws when nothing usable came back.
+ */
+export function parseQuestions(text: string, plan: PlannedSlot[], track: Track): GeneratedQuestion[] {
+  const parsed = parseJson<{ questions?: unknown }>(text);
   const raw = Array.isArray(parsed.questions) ? parsed.questions : [];
 
   const questions: GeneratedQuestion[] = raw
@@ -200,11 +320,19 @@ export async function generateQuestions({
         entry && typeof entry === "object" && typeof (entry as { topic?: unknown }).topic === "string"
           ? (entry as { topic: string }).topic.trim()
           : null;
+      const modelType =
+        entry && typeof entry === "object" && typeof (entry as { type?: unknown }).type === "string"
+          ? (entry as { type: string }).type
+          : null;
+      const type =
+        slot.source && modelType && TRACK_TYPES[track].includes(modelType as QuestionType)
+          ? (modelType as QuestionType)
+          : slot.type;
       return {
-        // The plan's type wins, whatever label the model put on the slot.
-        type: slot.type,
+        type,
         topic: slot.topic ?? modelTopic,
         question: question.trim(),
+        source: slot.source,
       };
     })
     .filter((q): q is GeneratedQuestion => q !== null);
@@ -212,6 +340,5 @@ export async function generateQuestions({
   if (questions.length === 0) {
     throw new Error("Question generation returned no usable questions.");
   }
-
-  return { questions, provider: `${result.provider}/${result.model}` };
+  return questions;
 }
