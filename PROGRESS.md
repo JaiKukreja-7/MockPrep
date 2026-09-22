@@ -375,8 +375,14 @@ references them; there are no literal durations left outside the speaker.
 Exempt from the loop and length rules, by class: the speaker's four state
 animations (`.speaker-*`, 1.1–1.4s) and the `animate-pulse` dot on pending
 states. Both are status indicators, not decoration, and both already stop
-under reduced motion. Removing them would leave "thinking" with no signal;
-flagged rather than decided.
+under reduced motion — kept, by decision.
+
+*Follow-up:* `Button` takes `href` and renders a `Link` carrying the
+button's classes, and every `<Link><Button>` nesting (eight, across the
+landing page, error, unavailable, report and session screens) is gone.
+That nesting was invalid HTML — interactive content inside an anchor —
+and the reason the focus ring drew a rectangle around a pill; the ring now
+follows the pill. `tests/unit/button.test.tsx` asserts both renders.
 
 ### Tailored rounds (step 16, 2026-09-22)
 

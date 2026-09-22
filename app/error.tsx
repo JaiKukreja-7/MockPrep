@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { Button } from "@/components/ui";
@@ -46,9 +45,7 @@ export default function ErrorPage({
         </p>
         <div className="flex flex-wrap gap-4">
           <Button onClick={reset}>{inRound ? "Back into the round" : "Try again"}</Button>
-          <Link href="/dashboard">
-            <Button variant="outline" size="compact">Back to the dashboard</Button>
-          </Link>
+          <Button href="/dashboard" variant="outline" size="compact">Back to the dashboard</Button>
         </div>
         {error.digest ? (
           <p className="text-u-micro">

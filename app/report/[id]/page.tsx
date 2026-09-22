@@ -70,9 +70,7 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
           <Link href="/dashboard" className="link eyebrow hidden sm:block">
             Back to dashboard
           </Link>
-          <Link href="/dashboard">
-            <Button>Start another round</Button>
-          </Link>
+          <Button href="/dashboard">Start another round</Button>
         </div>
       </header>
 
@@ -140,9 +138,7 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                 below; the score cannot be made now.
               </p>
               <div>
-                <Link href="/dashboard">
-                  <Button>Start a new round</Button>
-                </Link>
+                <Button href="/dashboard">Start a new round</Button>
               </div>
             </div>
           ) : (

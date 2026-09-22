@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Button } from "@/components/ui";
 import { getSession } from "@/lib/data/session";
@@ -43,12 +42,8 @@ export default async function SessionPage({ params }: PageProps<"/session/[id]">
             fresh one when you are ready.
           </p>
           <div className="flex flex-wrap gap-4">
-            <Link href="/dashboard">
-              <Button>Start a new round</Button>
-            </Link>
-            <Link href="/sessions">
-              <Button variant="outline" size="compact">See past rounds</Button>
-            </Link>
+            <Button href="/dashboard">Start a new round</Button>
+            <Button href="/sessions" variant="outline" size="compact">See past rounds</Button>
           </div>
         </main>
       </div>

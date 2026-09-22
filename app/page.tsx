@@ -113,9 +113,7 @@ export default async function Home() {
           <Link href="/sign-in" className="link eyebrow hidden py-3 sm:block">
             Sign in
           </Link>
-          <Link href="/sign-in">
-            <Button>Start a round</Button>
-          </Link>
+          <Button href="/sign-in">Start a round</Button>
         </div>
       </header>
 

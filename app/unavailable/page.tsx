@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Button } from "@/components/ui";
 
 export const metadata = { title: "Temporarily unavailable — MockPrep" };
@@ -38,12 +37,8 @@ export default async function UnavailablePage({
           cannot get to them right now. This usually clears in a minute.
         </p>
         <div className="flex flex-wrap gap-4">
-          <Link href={from}>
-            <Button>Try again</Button>
-          </Link>
-          <Link href="/">
-            <Button variant="outline" size="compact">Back to the front page</Button>
-          </Link>
+          <Button href={from}>Try again</Button>
+          <Button href="/" variant="outline" size="compact">Back to the front page</Button>
         </div>
       </main>
     </div>
