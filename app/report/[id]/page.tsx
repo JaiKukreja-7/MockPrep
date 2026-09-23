@@ -4,7 +4,7 @@ import { Button, PillTag, RuledRow, RuledRowList } from "@/components/ui";
 import { getReport } from "@/lib/data/session";
 import { ScoreRetry } from "@/app/session/[id]/score-retry";
 import { SOURCE_LABEL, TYPE_LABEL } from "@/lib/question-types";
-import { RUBRIC_LABEL } from "@/lib/question-rubric";
+import { RUBRIC, RUBRIC_LABEL } from "@/lib/question-rubric";
 
 export const metadata = { title: "Scored report — MockPrep" };
 
@@ -191,8 +191,13 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                           <>
                             {" "}
                             <span aria-hidden>·</span>{" "}
-                            {Object.entries(round.detail)
-                              .map(([k, v]) => `${RUBRIC_LABEL[k] ?? k} ${v}`)
+                            {/* The type's own axis order, not the order
+                                Postgres hands jsonb back in — it sorts keys
+                                by length, so "depth · clarity · accuracy"
+                                was reaching the screen. */}
+                            {RUBRIC[round.type]
+                              .filter((k) => round.detail![k] !== undefined)
+                              .map((k) => `${RUBRIC_LABEL[k] ?? k} ${round.detail![k]}`)
                               .join(" · ")}
                           </>
                         ) : null}

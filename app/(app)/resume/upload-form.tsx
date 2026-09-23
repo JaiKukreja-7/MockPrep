@@ -8,7 +8,7 @@ import { analyseResumeUpload, type AnalyseState } from "./actions";
  * Extraction plus a full audit is a real round trip, so the pending state has
  * to say so rather than leaving a dead button.
  */
-export function UploadForm() {
+export function UploadForm({ isGuest }: { isGuest: boolean }) {
   const [state, formAction, pending] = useActionState<AnalyseState, FormData>(
     analyseResumeUpload,
     {},
@@ -27,18 +27,24 @@ export function UploadForm() {
         </div>
 
         <label className="flex min-w-64 flex-1 flex-col gap-2">
-          <span className="eyebrow">Resume — PDF or DOCX</span>
+          {/* Guests cannot analyse a resume — the action refuses and the
+              restrictive RLS policy on analyses refuses behind it. Say so
+              on the control rather than after the file has been read, the
+              way the start-round form does. */}
+          <span className="eyebrow">
+            {isGuest ? "Resume — needs an account" : "Resume — PDF or DOCX"}
+          </span>
           <input
             type="file"
             name="resume"
             accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             required
-            disabled={pending}
+            disabled={pending || isGuest}
             className="input h-auto rounded-surface py-4 text-u-body file:mr-4 file:rounded-pill file:border-0 file:bg-ink file:px-4 file:py-2 file:text-ink-inverse file:text-u-eyebrow"
           />
         </label>
 
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || isGuest}>
           {pending ? "Reading your resume…" : "Analyse"}
         </Button>
       </div>
@@ -57,8 +63,9 @@ export function UploadForm() {
       ) : null}
 
       <p className="text-u-micro">
-        The file is read in memory and discarded. Only the analysis is stored —
-        never the resume text.
+        {isGuest
+          ? "Resume checks need an account. Add an email to unlock them."
+          : "The file is read in memory and discarded. Only the analysis is stored — never the resume text."}
       </p>
     </form>
   );

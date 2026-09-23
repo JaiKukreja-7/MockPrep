@@ -9,6 +9,22 @@ export interface TaskRequest {
   user: string;
   json?: boolean;
   temperature?: number;
+  /**
+   * Raise this call to sensitive even when its task is not.
+   *
+   * A task's `sensitive` flag is about the content that task ALWAYS sees.
+   * This is for content that only some calls carry: a round tailored to a
+   * resume puts the candidate's own projects and employers into the
+   * question text, and that text then reaches scoring, follow-ups and the
+   * voice brain — tasks that are not sensitive in general. The session
+   * decides, so the flag travels with the call, not the table.
+   *
+   * The effect is the same either way: every step whose provider may train
+   * on submitted content is dropped from the chain before the first
+   * request, and if that empties the chain the call fails rather than
+   * falling back to a training-eligible provider.
+   */
+  sensitive?: boolean;
 }
 
 export interface TaskResult extends CompletionResult {
@@ -43,20 +59,28 @@ export async function runTask(
   request: TaskRequest,
 ): Promise<TaskResult> {
   const config = TASKS[task];
+  const sensitive = config.sensitive || request.sensitive === true;
   const attempts: AttemptLog[] = [];
 
-  for (const step of config.chain) {
-    const provider = getProvider(step.provider);
+  // A call raised to sensitive keeps only the private-policy steps, and the
+  // filter is what enforces it — not a check inside the loop, which a step
+  // added to the chain at runtime could still slip past on some other path.
+  // The table's own sensitive tasks are already private-only (routing.ts
+  // refuses to build anything else), so this changes nothing for them.
+  const chain = sensitive
+    ? config.chain.filter((step) => getProvider(step.provider).dataPolicy === "private")
+    : config.chain;
 
-    // Belt and braces: routing.ts already refuses to build an unsafe table,
-    // but this re-checks with the request in hand, in case a chain is ever
-    // assembled dynamically.
-    if (config.sensitive && provider.dataPolicy !== "private") {
-      throw new Error(
-        `Refusing to send sensitive task "${task}" to ${step.provider} ` +
-          `(data policy: ${provider.dataPolicy}).`,
-      );
-    }
+  if (chain.length === 0) {
+    throw new Error(
+      `Refusing to run "${task}" as sensitive: no provider in its chain has ` +
+        `a private data policy. Add one to lib/llm/routing.ts rather than ` +
+        `letting this content reach a provider that may train on it.`,
+    );
+  }
+
+  for (const step of chain) {
+    const provider = getProvider(step.provider);
 
     if (!provider.isConfigured()) {
       attempts.push({

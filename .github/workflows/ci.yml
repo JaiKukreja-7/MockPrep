@@ -6,7 +6,7 @@ on:
   pull_request:
 
 # Three jobs, three costs. `unit` needs nothing and also runs inside the
-# Cloud Run image build via `npm run build`. The other two need the Supabase
+# production build via `npm run build`. The other two need the Supabase
 # project: add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY as
 # repository secrets. Without them those jobs fail, by design — a check that
 # silently skips is a check that has stopped checking. E2E_EMAIL and
@@ -23,7 +23,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx tsc --noEmit
+      # `next typegen` first: PageProps and LayoutProps are generated into
+      # .next/types, so a bare tsc on a fresh checkout fails on every page.
+      - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:unit
 

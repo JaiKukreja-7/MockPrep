@@ -138,6 +138,30 @@ describe("guest column grants on public.users", () => {
   });
 });
 
+describe("consume_llm_quota refuses a non-positive cost", () => {
+  it("cannot be used to walk the counter back down", async () => {
+    // The bug this guards: at the cap, `p_cost => -10` passed the check
+    // (`used + cost > cap` is false for a negative cost) and the update then
+    // subtracted, resetting the day. Ten spends, one negative call, repeat.
+    //
+    // A cost of ZERO is not the bug and stays a read — see the first case in
+    // this file, which uses it to check a new guest starts at 0 of the cap.
+    const { data } = await supabase.rpc("consume_llm_quota", { p_cost: -5 });
+    const row = Array.isArray(data) ? data[0] : data;
+    expect(
+      row?.allowed,
+      "a negative cost was accepted — apply supabase/migrations/20260924000000_quota_negative_cost.sql " +
+        "and 20260924010000_quota_zero_cost_read.sql",
+    ).toBe(false);
+
+    // And the counter did not move. This block runs after the suite above
+    // has spent the guest's ten, so it is still at the cap.
+    const after = await consume(1);
+    expect(after.allowed).toBe(false);
+    expect(after.used).toBe(GUEST_CAP);
+  });
+});
+
 describe("refund_llm_quota", () => {
   it("gives back a charged request, floored at zero, and needs its migration", async () => {
     // This block runs after the quota suite above has spent the guest's 10.

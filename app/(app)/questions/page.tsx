@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PillTag, RuledRow, RuledRowList } from "@/components/ui";
+import { TYPE_LABEL } from "@/lib/question-types";
 import { getQuestionBank } from "@/lib/data/library";
 import type { Track } from "@/lib/supabase/types";
 
@@ -59,13 +60,70 @@ export default async function QuestionsPage({
                 key={q.question}
                 title={q.question}
                 meta={
-                  q.asked > 1 ? (
-                    <>
-                      Asked <span className="numeric">{q.asked}</span> times
-                    </>
-                  ) : null
+                  <>
+                    {TYPE_LABEL[q.type]}
+                    {q.topic ? (
+                      <>
+                        {" "}
+                        <span aria-hidden>·</span> {q.topic}
+                      </>
+                    ) : null}
+                    {q.asked > 1 ? (
+                      <>
+                        {" "}
+                        <span aria-hidden>·</span> Asked{" "}
+                        <span className="numeric">{q.asked}</span> times
+                      </>
+                    ) : null}
+                  </>
                 }
-                trailing={<PillTag>{q.track}</PillTag>}
+                trailing={
+                  <span className="flex items-center gap-4">
+                    <PillTag>{q.track}</PillTag>
+                    {q.score !== null ? (
+                      <span className="numeric text-u-lg font-medium">{q.score}</span>
+                    ) : null}
+                  </span>
+                }
+                stackTrailing
+                footer={
+                  /* The bank was a list with nothing to do. Each question now
+                     carries what you said and what a strong answer was —
+                     collapsed, same idiom as the report — and a way back to
+                     the round it came from. */
+                  <div className="mt-4 flex flex-col gap-4">
+                    {q.answer || q.modelAnswer ? (
+                      <details className="disclosure">
+                        <summary className="link eyebrow">
+                          {q.answer && q.modelAnswer
+                            ? "Your answer, and a strong one"
+                            : q.answer
+                              ? "Your answer"
+                              : "What a strong answer sounds like"}
+                        </summary>
+                        <div className="mt-4 flex max-w-3xl flex-col gap-6">
+                          {q.answer ? (
+                            <div>
+                              <p className="eyebrow">You said</p>
+                              <p className="mt-2 whitespace-pre-line text-u-body">{q.answer}</p>
+                            </div>
+                          ) : null}
+                          {q.modelAnswer ? (
+                            <div>
+                              <p className="eyebrow">A strong answer</p>
+                              <p className="mt-2 whitespace-pre-line text-u-body">{q.modelAnswer}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      </details>
+                    ) : null}
+                    <p>
+                      <Link href={`/report/${q.sessionId}`} className="link inline-block py-1 text-u-body">
+                        See the round this came from
+                      </Link>
+                    </p>
+                  </div>
+                }
               />
             ))}
           </RuledRowList>

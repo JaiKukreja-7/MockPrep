@@ -64,6 +64,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unknown round." }, { status: 404 });
   }
 
+  // Read once, used by the follow-up and the bridge line below. A round
+  // tailored to a resume carries the candidate's own projects in its
+  // question text, so every model call this turn makes is raised to
+  // sensitive — Groq only, no training-eligible leg. See
+  // TaskRequest.sensitive in lib/llm/index.ts.
+  const { data: session } = await supabase
+    .from("sessions")
+    .select("level, tailored_from_resume")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const tailored = session?.tailored_from_resume === true;
+
   /* ------------------------------------------------ round-length ceiling */
   const { data: spoken } = await supabase
     .from("transcripts")
@@ -170,12 +182,12 @@ export async function POST(request: NextRequest) {
   if (!round.follow_up) {
     let probe: string | null = null;
     try {
-      const { data: session } = await supabase.from("sessions").select("level").eq("id", sessionId).maybeSingle();
       ({ probe } = await followUp({
         type: round.question_type,
         level: session?.level ?? "fresher",
         question: round.question,
         answer: text,
+        sensitive: tailored,
       }));
     } catch (error) {
       console.error(`[mockprep] follow-up skipped: ${error instanceof Error ? error.message : String(error)}`);
@@ -217,6 +229,9 @@ export async function POST(request: NextRequest) {
       question: round.question,
       answer: text,
       isLast: !next,
+      // Gemini leads this chain and trains on the free tier; a tailored
+      // round's question names the candidate's own work, so it runs on Groq.
+      sensitive: tailored,
     }));
   } catch {
     acknowledgement = null;

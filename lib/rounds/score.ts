@@ -32,7 +32,7 @@ export async function scoreSession(
   }
 
   const [{ data: session }, { data: lines }, { data: rounds }] = await Promise.all([
-    supabase.from("sessions").select("level").eq("id", sessionId).maybeSingle(),
+    supabase.from("sessions").select("level, tailored_from_resume").eq("id", sessionId).maybeSingle(),
     supabase
       .from("transcripts")
       .select("id, round_id, at_seconds, speaker, body")
@@ -69,11 +69,17 @@ export async function scoreSession(
     body: l.body,
   }));
 
+  // A round tailored to a resume puts the candidate's own projects and
+  // employers into the question text, which both of these calls see — and
+  // which the model answers are told to build on. Raise both: Groq only, no
+  // training-eligible fallback leg. See TaskRequest.sensitive.
+  const sensitive = session?.tailored_from_resume === true;
+
   try {
     // Independent, and each may spend its backoff ladder before failing over.
     const [score, flagResult] = await Promise.all([
-      scoreRounds(toScore),
-      extractFlags(indexed),
+      scoreRounds(toScore, true, sensitive),
+      extractFlags(indexed, sensitive),
     ]);
 
     await supabase.from("scores").upsert({

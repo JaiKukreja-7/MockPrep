@@ -10,6 +10,7 @@ const {
   ROUND_PLAN,
   DSA_TOPICS,
   CS_TOPICS,
+  FOCUS_BRIEF,
 } = await import("@/lib/llm/tasks/generate-questions");
 
 /** A deterministic "random": returns the values in order, then repeats the last. */
@@ -133,5 +134,30 @@ describe("generateQuestions", () => {
   it("throws when nothing usable comes back", async () => {
     runTask.mockResolvedValueOnce({ provider: "groq", model: "m", text: '{"questions": [{"type":"dsa"}]}' });
     await expect(generateQuestions({ track: "engineering", role: "x", level: "fresher" })).rejects.toThrow(/no usable questions/);
+  });
+});
+
+describe("a drilled round", () => {
+  const plan = planRound("general", "fresher");
+
+  it("adds the habit's brief, and nothing when there is no focus", () => {
+    const drilled = buildQuestionPrompt({ track: "general", role: "x", level: "fresher", plan, focus: "no_number" }).user;
+    expect(drilled).toMatch(/This candidate answers without numbers/);
+    expect(drilled).toMatch(/ask for scale, cost, duration, complexity or measured outcome/);
+    const plain = buildQuestionPrompt({ track: "general", role: "x", level: "fresher", plan }).user;
+    expect(plain).not.toMatch(/This candidate/);
+  });
+
+  it("has a brief for every flag the extractor can produce", () => {
+    for (const flag of ["filler", "restated", "no_number", "rambled"] as const) {
+      expect(FOCUS_BRIEF[flag], flag).toMatch(/\S/);
+      expect(buildQuestionPrompt({ track: "general", role: "x", level: "fresher", plan, focus: flag }).user).toContain(FOCUS_BRIEF[flag]);
+    }
+  });
+
+  it("changes how questions are asked, never the plan", () => {
+    const drilled = buildQuestionPrompt({ track: "engineering", role: "x", level: "fresher", plan: planRound("engineering", "fresher", seq(0, 0, 0)), focus: "rambled" }).user;
+    const slots = drilled.split("\n").filter((l) => /^\d\. type "/.test(l));
+    expect(slots.map((l) => l.match(/type "(\w+)"/)![1])).toEqual(["dsa", "dsa", "cs_fundamentals", "system_design"]);
   });
 });

@@ -23,7 +23,15 @@ let server: ChildProcess | null = null;
 export async function setup(project: TestProject) {
   loadLocalEnv();
   server = spawn("node", ["node_modules/next/dist/bin/next", "start", "-p", String(PORT)], {
-    env: { ...process.env, NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1" },
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      NEXT_TELEMETRY_DISABLED: "1",
+      // /test is 404 in production; the audit still wants it, because a
+      // design violation shows on the specimen sheet before it shows on a
+      // real screen. Set only here, never on Vercel.
+      MOCKPREP_SHOW_PRIMITIVES: "1",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let log = "";

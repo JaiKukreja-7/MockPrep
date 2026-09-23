@@ -75,17 +75,75 @@ describe("routing table data-policy assertion", () => {
     await expect(import("@/lib/llm/routing")).resolves.toBeDefined();
   });
 
-  it("runTask refuses a sensitive request even if the table were bypassed", async () => {
+  it("runTask drops a training-eligible step from a sensitive chain even if the table were bypassed", async () => {
     vi.doMock("@/lib/llm/registry", () =>
       registryWith({ gemini: "private", groq: "private", openrouter: "trains-on-free-tier" }),
     );
     const { runTask } = await import("@/lib/llm/index");
     const { TASKS } = await import("@/lib/llm/routing");
-    // Assemble the unsafe chain at runtime, after the import-time check passed,
-    // with the bad step first so nothing else can answer before it is reached.
+    // Assemble the unsafe chain at runtime, after the import-time check
+    // passed, with the bad step FIRST so it would answer if it were used.
     TASKS.resume_analysis.chain.unshift({ provider: "openrouter", model: "x" });
-    await expect(runTask("resume_analysis", { system: "", user: "" })).rejects.toThrow(
-      /Refusing to send sensitive task "resume_analysis" to openrouter/,
+    const result = await runTask("resume_analysis", { system: "", user: "" });
+    expect(result.provider).toBe("groq");
+    expect(result.attempts.some((a) => a.provider === "openrouter")).toBe(false);
+  });
+
+  it("refuses outright when a sensitive chain has no private provider left", async () => {
+    vi.doMock("@/lib/llm/registry", () =>
+      registryWith({ gemini: "trains-on-free-tier", groq: "trains-on-free-tier", openrouter: "trains-on-free-tier" }),
+    );
+    // The table itself is now unsafe, so importing it throws first — which is
+    // the point: this state cannot be reached at runtime.
+    await expect(import("@/lib/llm/routing")).rejects.toThrow(/marked sensitive but routes to/);
+  });
+});
+
+describe("a call raised to sensitive at runtime (a resume-tailored round)", () => {
+  const privateRegistry = () =>
+    registryWith({ gemini: "trains-on-free-tier", groq: "private", openrouter: "trains-on-free-tier" });
+
+  it("normally uses the whole chain, training-eligible leads included", async () => {
+    vi.doMock("@/lib/llm/registry", () => privateRegistry());
+    const { runTask } = await import("@/lib/llm/index");
+    // interviewer_turn leads with gemini, which trains on the free tier.
+    const result = await runTask("interviewer_turn", { system: "", user: "" });
+    expect(result.provider).toBe("gemini");
+  });
+
+  it("drops every training-eligible step when the call says sensitive", async () => {
+    vi.doMock("@/lib/llm/registry", () => privateRegistry());
+    const { runTask } = await import("@/lib/llm/index");
+    for (const task of ["interviewer_turn", "answer_scoring", "flag_extraction", "follow_up"] as const) {
+      const result = await runTask(task, { system: "", user: "", sensitive: true });
+      expect(result.provider, task).toBe("groq");
+      expect(result.attempts.some((a) => a.provider !== "groq"), task).toBe(false);
+    }
+  });
+
+  it("every task keeps a private leg, so any call can be raised", async () => {
+    vi.doMock("@/lib/llm/registry", () => privateRegistry());
+    const { TASKS } = await import("@/lib/llm/routing");
+    const { getProvider } = await import("@/lib/llm/registry");
+    for (const [task, config] of Object.entries(TASKS)) {
+      expect(
+        config.chain.some((s) => getProvider(s.provider).dataPolicy === "private"),
+        task,
+      ).toBe(true);
+    }
+  });
+
+  it("throws rather than sending when raising would empty the chain", async () => {
+    // A table that is safe at import (no task marked sensitive routes badly)
+    // but has a task with no private leg at all.
+    vi.doMock("@/lib/llm/registry", () =>
+      registryWith({ gemini: "trains-on-free-tier", groq: "private", openrouter: "trains-on-free-tier" }),
+    );
+    const { runTask } = await import("@/lib/llm/index");
+    const { TASKS } = await import("@/lib/llm/routing");
+    TASKS.interviewer_turn.chain = [{ provider: "gemini", model: "x" }];
+    await expect(runTask("interviewer_turn", { system: "", user: "", sensitive: true })).rejects.toThrow(
+      /no provider in its chain has a private data policy/,
     );
   });
 });

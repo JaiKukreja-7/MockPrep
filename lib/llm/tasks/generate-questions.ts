@@ -1,7 +1,13 @@
 import "server-only";
 import { runTask } from "../index";
 import { parseJson } from "../json";
-import type { ExperienceLevel, QuestionSource, QuestionType, Track } from "@/lib/supabase/types";
+import type {
+  ExperienceLevel,
+  QuestionSource,
+  QuestionType,
+  Track,
+  TranscriptFlag,
+} from "@/lib/supabase/types";
 
 /* ---------------------------------------------------------------------------
    THE PLAN — what kinds of question a round asks, per track.
@@ -94,10 +100,36 @@ export const LEVEL_LABEL: Record<ExperienceLevel, string> = {
   junior: "1–3 years",
 };
 
+/**
+ * What a drilled round presses on. These are delivery habits the flag
+ * extractor found, not topics — so they change how the questions are asked,
+ * never what they are about. "Drill it" on the dashboard passes one.
+ */
+export const FOCUS_BRIEF: Record<TranscriptFlag, string> = {
+  filler:
+    "This candidate fills silence with hedges and filler. Ask questions that " +
+    "demand a direct claim in the first sentence — 'what would you do', not " +
+    "'how do you think about'.",
+  no_number:
+    "This candidate answers without numbers. Every question must have a " +
+    "quantity in its answer: ask for scale, cost, duration, complexity or " +
+    "measured outcome explicitly.",
+  restated:
+    "This candidate restates the question before answering. Ask questions " +
+    "that are already narrow enough to answer in one line, so there is " +
+    "nothing to restate.",
+  rambled:
+    "This candidate runs long and lands late. Ask questions with a single " +
+    "definite answer, and say in the question that you want it in under a " +
+    "minute.",
+};
+
 export interface GenerateQuestionsInput {
   track: Track;
   role: string;
   level: ExperienceLevel;
+  /** A delivery habit to press on, from "Drill it" on the dashboard. */
+  focus?: TranscriptFlag | null;
   /** Injectable so tests get a deterministic draw. Defaults to Math.random. */
   random?: () => number;
 }
@@ -237,8 +269,9 @@ export function buildQuestionPrompt(input: {
   level: ExperienceLevel;
   plan: PlannedSlot[];
   tailoring?: Tailoring;
+  focus?: TranscriptFlag | null;
 }): { system: string; user: string } {
-  const { track, role, level, plan, tailoring } = input;
+  const { track, role, level, plan, tailoring, focus } = input;
   const slots = plan
     .map((slot, i) =>
       slot.source
@@ -256,6 +289,7 @@ export function buildQuestionPrompt(input: {
       `interviewing for "${role}" in ${TRACK_CONTEXT[track]}.\n\n` +
       `Pitch every question at ${LEVEL_BRIEF[level]}\n\n` +
       (tailoring ? tailoringBlock(tailoring) : "") +
+      (focus ? `${FOCUS_BRIEF[focus]}\n\n` : "") +
       `The questions, in order:\n${slots}\n\n` +
       `Rules:\n` +
       `- Each question is what a real interviewer would say aloud: one to ` +
@@ -280,10 +314,11 @@ export async function generateQuestions({
   track,
   role,
   level,
+  focus,
   random = Math.random,
 }: GenerateQuestionsInput): Promise<{ questions: GeneratedQuestion[]; provider: string }> {
   const plan = planRound(track, level, random);
-  const prompt = buildQuestionPrompt({ track, role, level, plan });
+  const prompt = buildQuestionPrompt({ track, role, level, plan, focus });
 
   const result = await runTask("question_generation", {
     json: true,

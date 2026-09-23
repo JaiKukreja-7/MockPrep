@@ -147,4 +147,27 @@ function assertDataPolicies() {
   }
 }
 
+/**
+ * Every task must have at least one private-policy step, because any call
+ * can be raised to sensitive at runtime — see TaskRequest.sensitive. A round
+ * tailored to a resume does exactly that for scoring, follow-ups, flags and
+ * the voice brain. Without a private leg such a call has nowhere to go and
+ * fails; better to find that out at boot than mid-round.
+ */
+function assertEveryTaskCanBeRaised() {
+  for (const [task, config] of Object.entries(TASKS) as Array<[LLMTask, TaskConfig]>) {
+    const hasPrivate = config.chain.some(
+      (step) => getProvider(step.provider).dataPolicy === "private",
+    );
+    if (!hasPrivate) {
+      throw new Error(
+        `Routing table is unsafe: task "${task}" has no provider with a ` +
+          `private data policy, so a call raised to sensitive — a round ` +
+          `tailored to a resume — could not run at all.`,
+      );
+    }
+  }
+}
+
 assertDataPolicies();
+assertEveryTaskCanBeRaised();

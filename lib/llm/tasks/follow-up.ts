@@ -8,6 +8,12 @@ export interface FollowUpInput {
   level: ExperienceLevel;
   question: string;
   answer: string;
+  /**
+   * True when the round was tailored to a resume: the question names the
+   * candidate's own projects, so this call may not reach a provider that
+   * trains on what it is sent.
+   */
+  sensitive?: boolean;
 }
 
 /** What a gap in each kind of answer looks like — the thing to probe for. */
@@ -59,6 +65,7 @@ export async function followUp(input: FollowUpInput): Promise<{ probe: string | 
   const result = await runTask("follow_up", {
     json: true,
     temperature: 0.3,
+    sensitive: input.sensitive,
     ...buildFollowUpPrompt(input),
   });
 

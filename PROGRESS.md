@@ -337,6 +337,81 @@ Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
 holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
 here until that is closed.
 
+### Audit follow-ups (2026-09-24)
+
+A full audit from a clean checkout — suites, production walkthrough, rot
+review, security pass — is in the conversation; these are the fixes.
+
+**B2 — the daily cap could be reset to zero by anyone.**
+`consume_llm_quota` had no guard on a non-positive `p_cost`, so
+`rpc('consume_llm_quota', { p_cost: -10 })` walked the counter back down:
+spend ten, reset, repeat, unlimited provider calls on our keys, reachable
+from a browser with the publishable key. `refund_llm_quota` has had that
+guard since it was written; migration `20260924000000_quota_negative_cost.sql`
+adds one to the charge, and `20260924010000_quota_zero_cost_read.sql`
+narrows it — the first copied refund's `p_cost <= 0` and so also blocked a
+cost of ZERO, which is a read of the counter, not a spend, and which the
+integration suite uses to check a new guest starts at 0 of 10. The hole was
+negatives; the guard is `p_cost < 0`. Refunds stay the only way the counter
+goes down. Verified against the real project: `-10` at the cap now returns
+`allowed:false` and leaves `used` at 10, while `0` still reads it back.
+
+**W1 — resume-derived content reaching training-eligible providers.**
+The routing table only knew about tasks that *always* see resume content.
+A round tailored to a resume puts the candidate's projects and employers
+into the *question* text, which then reaches scoring, model answers,
+follow-ups, flag extraction and the voice brain — none of them sensitive,
+and three of them with a training-eligible leg.
+
+`TaskRequest.sensitive` now raises a single call: `runTask` filters every
+non-private step out of the chain before the first request, and refuses
+outright if that empties it. `scoreSession`, `probeFor` and the voice route
+read `sessions.tailored_from_resume` and pass it; `flag_extraction` is
+included because the transcript it reads contains the interviewer's
+questions verbatim. A new boot-time assertion requires every task to keep
+at least one private leg, so a raised call always has somewhere to go.
+
+*The trade-off, stated:* a tailored round has no failover. Scoring,
+follow-ups, flags and the voice bridge all run on Groq alone — if Groq is
+down, a tailored round fails where an untailored one would fall back to
+OpenRouter or Gemini. That is the intended direction: the round fails
+rather than the content leaking.
+
+**W2 — "Drill it" was inert.** It is now a form that starts a round shaped
+like the user's last one (same role, track and level) with a `focus` field
+naming the habit. `FOCUS_BRIEF` turns each flag into one line of the
+generation prompt: it changes how questions are *asked*, never the plan or
+the topics. The flag is validated against the enum server-side, so the
+hidden field cannot inject prompt text.
+
+**W3 — the question bank was a dead list.** Each question now carries its
+type and topic, its score, a disclosure with what you said and what a
+strong answer was, and a link back to the round. The answer and the model
+answer come back embedded with the round, so it is still one query.
+
+**W4 — rubric axes rendered in jsonb key order** (`depth · clarity ·
+accuracy`), because Postgres sorts jsonb keys by length. The report now
+maps `RUBRIC[type]` over the stored object. `RUBRIC` moved to
+`lib/question-rubric.ts` — a domain fact the prompt and two screens share;
+the screens must not import the server-only LLM layer to learn it.
+
+**D1** `/resume` disables the input and the button for guests, matching the
+start form, instead of refusing after the file is parsed. **D3** `/test` is
+a 404 in production (`force-dynamic` plus a runtime read of
+`MOCKPREP_SHOW_PRIMITIVES`, which only the e2e server sets, so the audit
+keeps covering the specimen sheet). **D4** `npm run typecheck` runs
+`next typegen && tsc --noEmit`; a bare `tsc` on a fresh checkout fails on
+seven files, because `PageProps`/`LayoutProps` are generated. CI calls the
+script now. **D5** `modelAnswers()` is marked measurement-only with the
+steps to adopt it. **C1/C2** the duplicated "Go live on Vercel" item and
+the CI comment's Cloud Run claim are gone.
+
+*Left alone, by decision:* D2 (a signed-out unknown URL redirects to
+sign-in rather than 404ing — the proxy fails closed), C3 (the Cloud Run
+files stay, as DEPLOY.md already says), C4 (`VoiceTransportId`'s unbuilt
+`"relay"` variant), C5 (one leftover audit guest — SQL handed over
+separately).
+
 ### Model answers on the report (step 18, 2026-09-23)
 
 Every scored question now carries what a strong answer would have sounded
@@ -1085,17 +1160,16 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **Go live on Vercel** is done; **watch the follow-up rate in real
-   rounds** with `npm run measure:follow-up` if it ever feels off — the
-   corpus and the thresholds are in `tests/integration/follow-up-rate.test.ts`.
-2. **Go live on Vercel.** Follow `DEPLOY.md`: import `JaiKukreja-7/MockPrep`,
-   set the five environment variables, deploy, pick the function region
-   nearest Supabase, then add the domain to Supabase → Authentication → URL
-   Configuration, run `scripts/verify-deploy.sh <url>`, and one signed-in
-   round to see the cap count on Settings. (Cloud Run was the first target;
-   its Dockerfile and scripts still work and stay in the repo.)
-3. **Close the barge-in item before deploy** — see Blocked #2. Still open;
-   the deploy above ships the parked detector as is.
+1. **CI is failing at `npm ci` on every push** and has been since at least
+   step 14 — all three jobs, every commit. `npm ci` succeeds from a clean
+   clone locally (Node 24.12, npm 11.6), the lockfile is in sync and carries
+   the linux binaries, so the cause is only in the runner log, which needs
+   admin rights to read. Nothing has been verified by CI since then.
+2. **Watch the follow-up rate in real rounds** with `npm run
+   measure:follow-up` if it ever feels off — the corpus and the thresholds
+   are in `tests/integration/follow-up-rate.test.ts`.
+3. **Close the barge-in item** — see Blocked #2. Still open; production
+   ships the parked detector as is.
 4. **Build the Cloud Run relay** and point voice at `RelayVoiceTransport` for
    true speech-to-speech.
 5. **Timezone.** Dates render in the server's timezone. Fine while server-only;

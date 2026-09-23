@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 
@@ -416,4 +417,17 @@ describe.skipIf(!hasAccount)("signed in with data (E2E_EMAIL / E2E_PASSWORD)", (
       await audit(page, path!, width);
     });
   }
+});
+
+/* ------------------------------------------------------- production gates */
+
+describe("routes that must not exist in production", () => {
+  it("/test is only reachable because this server sets MOCKPREP_SHOW_PRIMITIVES", async () => {
+    // The audit's own server sets it (see tests/e2e/global-setup.ts), which
+    // is why every case above could audit /test. Without it a production
+    // build 404s — asserted here so the gate cannot be deleted silently.
+    const source = await readFile(new URL("../../app/test/page.tsx", import.meta.url), "utf8");
+    expect(source).toMatch(/process\.env\.NODE_ENV === "production" && !process\.env\["MOCKPREP_SHOW_PRIMITIVES"\]/);
+    expect(source).toMatch(/notFound\(\)/);
+  });
 });

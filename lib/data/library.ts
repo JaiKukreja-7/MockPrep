@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { sweepStaleSessions } from "@/lib/rounds/sweep";
-import type { SessionStatus, Track } from "@/lib/supabase/types";
+import type { QuestionType, SessionStatus, Track } from "@/lib/supabase/types";
 
 /* --------------------------------------------------------------------------
    Read models for Sessions, Reports and the question bank.
@@ -159,6 +159,16 @@ export interface BankQuestion {
   track: Track;
   /** How many times this question has come up across the user's rounds. */
   asked: number;
+  /** The most recent round that asked it, so the bank is not a dead list. */
+  sessionId: string;
+  type: QuestionType;
+  topic: string | null;
+  /** Null until that round is scored. */
+  score: number | null;
+  /** What the candidate said. Null on a round that was never answered. */
+  answer: string | null;
+  /** Null on rounds scored before model answers existed. */
+  modelAnswer: string | null;
 }
 
 /**
@@ -175,9 +185,15 @@ export async function getQuestionBank(
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // The candidate's own line and the model answer come back with the round,
+  // so the bank can show what they said and what a strong answer was without
+  // a second trip per question. Rows are newest first, so the first time a
+  // question is seen is the most recent round that asked it.
   const { data, error } = await supabase
     .from("rounds")
-    .select("question, created_at, sessions(track)")
+    .select(
+      "question, created_at, session_id, question_type, topic, score, model_answer, sessions(track), transcripts(speaker, body, at_seconds)",
+    )
     .order("created_at", { ascending: false })
     .limit(500);
 
@@ -195,8 +211,28 @@ export async function getQuestionBank(
 
     const key = row.question.trim();
     const existing = byQuestion.get(key);
-    if (existing) existing.asked += 1;
-    else byQuestion.set(key, { question: key, track: rowTrack, asked: 1 });
+    if (existing) {
+      existing.asked += 1;
+      continue;
+    }
+
+    // The first candidate line of the round answers the question itself; a
+    // second, where there is one, answers the follow-up.
+    const said = (row.transcripts ?? [])
+      .filter((l) => l.speaker === "candidate")
+      .sort((a, b) => (a.at_seconds ?? 0) - (b.at_seconds ?? 0));
+
+    byQuestion.set(key, {
+      question: key,
+      track: rowTrack,
+      asked: 1,
+      sessionId: row.session_id,
+      type: row.question_type ?? "behavioural",
+      topic: row.topic,
+      score: row.score,
+      answer: said[0]?.body ?? null,
+      modelAnswer: row.model_answer,
+    });
   }
 
   return {

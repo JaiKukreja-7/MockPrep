@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { QuestionType, Track, TranscriptFlag } from "@/lib/supabase/types";
+import type { ExperienceLevel, QuestionType, Track, TranscriptFlag } from "@/lib/supabase/types";
 
 /* --------------------------------------------------------------------------
    Read models for the dashboard. Everything here is scoped by RLS rather than
@@ -36,6 +36,13 @@ export interface FocusArea {
   sessionCount: number;
 }
 
+/** What "Drill it" starts a round with: the shape of the user's last round. */
+export interface DrillDefaults {
+  role: string;
+  track: Track;
+  level: ExperienceLevel;
+}
+
 export interface HeatmapData {
   cells: Array<{ date: string; count: number; column: number; row: number }>;
   months: Array<{ label: string; column: number }>;
@@ -56,6 +63,8 @@ export interface DashboardData {
   upNext: UpNext | null;
   recentSessions: RecentSession[];
   focusAreas: FocusArea[];
+  /** Null until there is a round to copy. */
+  drillDefaults: DrillDefaults | null;
   heatmap: HeatmapData;
 }
 
@@ -201,7 +210,7 @@ export async function getDashboard(): Promise<DashboardData | null> {
     supabase
       .from("sessions")
       .select(
-        "id, title, track, started_at, duration_seconds, scores(overall, structure, specificity, pace)",
+        "id, title, track, level, started_at, duration_seconds, scores(overall, structure, specificity, pace)",
       )
       .eq("status", "scored")
       .order("started_at", { ascending: false, nullsFirst: false })
@@ -299,5 +308,9 @@ export async function getDashboard(): Promise<DashboardData | null> {
       .filter((v): v is string => v !== null),
   );
 
-  return { latest, byType, upNext, recentSessions, focusAreas, heatmap };
+  const drillDefaults: DrillDefaults | null = rows[0]
+    ? { role: rows[0].title, track: rows[0].track, level: rows[0].level ?? "fresher" }
+    : null;
+
+  return { latest, byType, upNext, recentSessions, focusAreas, drillDefaults, heatmap };
 }

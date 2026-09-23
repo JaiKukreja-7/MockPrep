@@ -185,3 +185,34 @@ describe("the report's model answers", () => {
     expect(html).toMatch(/numeric text-u-lg font-medium">62</);
   });
 });
+
+describe("rubric axes render in the rubric's order, not jsonb's", () => {
+  it("prints accuracy · depth · clarity even when the stored object is key-sorted", async () => {
+    // Postgres returns jsonb with keys sorted by length, which is how
+    // "depth · clarity · accuracy" reached the screen.
+    report = {
+      session: { id: "s1", title: "x", track: "engineering", status: "scored", started_at: null, duration_seconds: 600, job_title: null, company: null, tailored_from_resume: false },
+      score: { overall: 70, structure: 70, specificity: 70, pace: 70 },
+      transcript: [],
+      rounds: [
+        {
+          id: "r1", ordinal: 1, question: "Why is a page fault slow?", type: "cs_fundamentals",
+          topic: "operating systems", source: null, followUp: null, modelAnswer: null, score: 40,
+          detail: { depth: 10, clarity: 60, accuracy: 50 },
+        },
+      ],
+    };
+    const { default: ReportPage } = await import("@/app/report/[id]/page");
+    const text = strip(renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ id: "s1" }), searchParams: Promise.resolve({}) })));
+    expect(text).toMatch(/Accuracy 50 · Depth 10 · Clarity 60/);
+    expect(text).not.toMatch(/Depth 10 · Clarity 60 · Accuracy 50/);
+  });
+
+  it("prints only the axes that are actually stored", async () => {
+    report!.rounds[0].detail = { accuracy: 50 };
+    const { default: ReportPage } = await import("@/app/report/[id]/page");
+    const text = strip(renderToStaticMarkup(await ReportPage({ params: Promise.resolve({ id: "s1" }), searchParams: Promise.resolve({}) })));
+    expect(text).toMatch(/Accuracy 50/);
+    expect(text).not.toMatch(/Depth/);
+  });
+});

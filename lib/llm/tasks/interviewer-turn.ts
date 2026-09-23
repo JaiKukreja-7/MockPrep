@@ -8,6 +8,13 @@ export interface InterviewerTurnInput {
   question: string;
   /** True when this was the final question of the round. */
   isLast: boolean;
+  /**
+   * True when the round was tailored to a resume: the question names the
+   * candidate's own projects, so this call may not reach a provider that
+   * trains on what it is sent. Note this drops Gemini, which leads this
+   * chain — a tailored voice round runs on Groq alone.
+   */
+  sensitive?: boolean;
 }
 
 /**
@@ -24,9 +31,11 @@ export async function interviewerTurn({
   answer,
   question,
   isLast,
+  sensitive,
 }: InterviewerTurnInput): Promise<{ text: string; provider: string }> {
   const result = await runTask("interviewer_turn", {
     temperature: 0.6,
+    sensitive,
     system:
       "You are conducting a mock interview out loud. You are brief and warm " +
       "but never flattering. Reply with speech only — no stage directions, " +

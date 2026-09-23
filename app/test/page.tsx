@@ -11,14 +11,38 @@ import {
   TableHeaderCell,
   TableRow,
 } from "@/components/ui";
+import { notFound } from "next/navigation";
 import { SpeakerDemo } from "./speaker-demo";
 
 export const metadata = {
   title: "Primitives — MockPrep",
 };
 
+// Without this the page is prerendered at build time, the gate runs on the
+// build machine, and its 404 is baked into a static file that no runtime
+// environment can change.
+export const dynamic = "force-dynamic";
+
+export default function TestPageGate() {
+  // Bracket access on purpose: Next inlines `process.env.FOO` at build time,
+  // so a dotted read would bake in whatever the build machine had and ignore
+  // the server's own environment. This one is read when the request arrives.
+  if (process.env.NODE_ENV === "production" && !process.env["MOCKPREP_SHOW_PRIMITIVES"]) {
+    notFound();
+  }
+  return <Primitives />;
+}
+
+
 /**
- * Specimen sheet for the primitives. Every section runs once on white
+ * Specimen sheet for the primitives.
+ *
+ * Not a public page: in a production build it is a 404 unless
+ * MOCKPREP_SHOW_PRIMITIVES is set. It carries sample copy and a decorative
+ * "Drill it" that does nothing — exactly the sort of thing that should not
+ * be reachable on the live site — but it is also where a design violation
+ * shows up first, so the e2e design audit starts its server with that
+ * variable set and keeps auditing it. Vercel does not have it. Every section runs once on white
  * and once inside .surface-dark, since the primitives are built to invert
  * off currentColor rather than off a light/dark variant.
  */
@@ -86,7 +110,7 @@ const projects = [
   { title: "Salary negotiation practice", tag: "Career" },
 ];
 
-export default function TestPage() {
+function Primitives() {
   return (
     <main className="w-full max-w-page mx-auto px-8 py-20">
       <header className="flex flex-col gap-4 pb-20">

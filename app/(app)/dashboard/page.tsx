@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import {
-  Button,
   Heatmap,
   PillTag,
   RuledRow,
@@ -9,6 +8,7 @@ import {
 import { getDashboard } from "@/lib/data/dashboard";
 import { TYPE_LABEL } from "@/lib/question-types";
 import { createClient } from "@/lib/supabase/server";
+import { DrillButton } from "./drill-button";
 import { StartRound } from "./start-round";
 
 export const metadata = {
@@ -44,7 +44,7 @@ export default async function DashboardPage() {
   // it narrows the type.
   if (!data) redirect("/sign-in?next=/dashboard");
 
-  const { latest, byType, upNext, recentSessions, focusAreas, heatmap } = data;
+  const { latest, byType, upNext, recentSessions, focusAreas, drillDefaults, heatmap } = data;
 
   return (
     <>
@@ -211,9 +211,13 @@ export default async function DashboardPage() {
                     // the scoring model, which is not wired up yet.
                     meta={`${area.flagCount} ${plural(area.flagCount, "flag")} across ${area.sessionCount} ${plural(area.sessionCount, "round")}`}
                     trailing={
-                      <Button variant="outline" size="compact">
-                        Drill it
-                      </Button>
+                      /* Starts a round angled at this habit, otherwise the
+                         shape of their last one. Hidden until there is a
+                         round to copy — a drill with nothing to copy would
+                         be a second start form with different defaults. */
+                      drillDefaults ? (
+                        <DrillButton flag={area.flag} label={area.label} defaults={drillDefaults} />
+                      ) : null
                     }
                   />
                 ))}

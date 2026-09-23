@@ -133,3 +133,27 @@ describe("scoreSession", () => {
     expect(recorded.ops.some((o) => o.table === "sessions" && has(o, "update"))).toBe(false);
   });
 });
+
+describe("a resume-tailored round is scored on a private provider only", () => {
+  it("raises both model calls when the session is tailored", async () => {
+    resolver = (op) =>
+      op.table === "transcripts" && has(op, "select")
+        ? { data: lines }
+        : op.table === "rounds" && has(op, "select")
+          ? { data: roundRows }
+          : op.table === "sessions" && has(op, "select")
+            ? { data: { level: "fresher", tailored_from_resume: true } }
+            : {};
+    await scoreSession("s1", 90);
+    // scoreRounds(rounds, withModelAnswers, sensitive)
+    expect(scoreRounds.mock.calls[0][2]).toBe(true);
+    // extractFlags(lines, sensitive) — the lines carry the question text too.
+    expect(extractFlags.mock.calls[0][1]).toBe(true);
+  });
+
+  it("leaves an untailored round on its normal chain", async () => {
+    await scoreSession("s1", 90);
+    expect(scoreRounds.mock.calls[0][2]).toBe(false);
+    expect(extractFlags.mock.calls[0][1]).toBe(false);
+  });
+});

@@ -12,9 +12,10 @@ import { generateTailoredQuestions } from "@/lib/llm/tasks/tailored-questions";
 import { extractResume, ResumeExtractionError } from "@/lib/resume/extract";
 import { followUp } from "@/lib/llm/tasks/follow-up";
 import { scoreSession } from "@/lib/rounds/score";
-import type { ExperienceLevel, RoundMode, Track } from "@/lib/supabase/types";
+import type { ExperienceLevel, RoundMode, Track, TranscriptFlag } from "@/lib/supabase/types";
 
 const LEVELS: ExperienceLevel[] = ["intern", "fresher", "junior"];
+const FLAGS: TranscriptFlag[] = ["filler", "restated", "no_number", "rambled"];
 
 export interface ActionState {
   error?: string;
@@ -48,6 +49,12 @@ export async function startRound(
   const level: ExperienceLevel = LEVELS.includes(levelRaw as ExperienceLevel)
     ? (levelRaw as ExperienceLevel)
     : "fresher";
+  // "Drill it" on the dashboard: press on one delivery habit. Validated
+  // against the enum, so an edited form cannot inject prompt text.
+  const focusRaw = String(formData.get("focus") ?? "");
+  const focus: TranscriptFlag | null = FLAGS.includes(focusRaw as TranscriptFlag)
+    ? (focusRaw as TranscriptFlag)
+    : null;
 
   const supabase = await createClient();
   const { user, outage } = await currentUser(supabase);
@@ -106,8 +113,8 @@ export async function startRound(
   let questions: GeneratedQuestion[];
   try {
     ({ questions } = tailoring
-      ? await generateTailoredQuestions({ track, role, level, tailoring })
-      : await generateQuestions({ track, role, level }));
+      ? await generateTailoredQuestions({ track, role, level, tailoring, focus })
+      : await generateQuestions({ track, role, level, focus }));
   } catch (error) {
     await refundQuota(1);
     return {
@@ -330,7 +337,8 @@ export async function scoreRound(
 /**
  * Asks the follow-up task whether to probe. Never throws: a follow-up is a
  * nicety, and losing the brain must not lose the round. The session's level
- * is read here rather than threaded through the form, so it cannot be spoofed.
+ * and its tailored flag are read here rather than threaded through the form,
+ * so neither can be spoofed.
  */
 async function probeFor(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -341,7 +349,7 @@ async function probeFor(
   try {
     const { data: session } = await supabase
       .from("sessions")
-      .select("level")
+      .select("level, tailored_from_resume")
       .eq("id", sessionId)
       .maybeSingle();
     const { probe } = await followUp({
@@ -349,6 +357,9 @@ async function probeFor(
       level: session?.level ?? "fresher",
       question: round.question,
       answer,
+      // A tailored question names their own projects; keep the probe on a
+      // provider that does not train on what it is sent.
+      sensitive: session?.tailored_from_resume === true,
     });
     return probe;
   } catch (error) {

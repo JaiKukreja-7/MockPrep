@@ -1,23 +1,15 @@
 import "server-only";
 import { runTask } from "../index";
 import { parseJson } from "../json";
+import { RUBRIC } from "@/lib/question-rubric";
 import type { ExperienceLevel, QuestionType } from "@/lib/supabase/types";
 
 /**
- * What each kind of answer is judged on. The session-level delivery axes —
- * structure, specificity, pace — stay as they were and stay on the report's
- * three meters; these are the *content* axes, per round, under the rubric
- * that fits the question. A DSA answer is not "structured" or not; it has or
- * has not got an approach, a complexity and its edge cases.
+ * The axes, re-exported from the one place that owns them — the report and
+ * the question bank render the same list, and must not import this module
+ * (it is server-only and pulls in the provider registry).
  */
-export const RUBRIC: Record<QuestionType, readonly string[]> = {
-  dsa: ["approach", "complexity", "edge_cases"],
-  cs_fundamentals: ["accuracy", "depth", "clarity"],
-  system_design: ["requirements", "tradeoffs", "scalability"],
-  behavioural: ["situation", "action", "result"],
-  case: ["structure", "numbers", "recommendation"],
-  product_sense: ["user", "metric", "reasoning"],
-};
+export { RUBRIC } from "@/lib/question-rubric";
 
 const RUBRIC_GUIDE: Record<QuestionType, string> = {
   dsa:
@@ -177,10 +169,21 @@ export function sanitiseModelAnswer(raw: unknown): string | null {
  * model returned per axis, never asked for as a total — an overall the model
  * invents separately can contradict its own parts.
  */
-export async function scoreRounds(rounds: RoundToScore[], withModelAnswers = true): Promise<SessionScore> {
+export async function scoreRounds(
+  rounds: RoundToScore[],
+  withModelAnswers = true,
+  /**
+   * True when the round was tailored to a resume: the questions — and the
+   * model answers this call writes, which are told to use the candidate's
+   * own specifics — carry resume content, so no training-eligible provider
+   * may see them.
+   */
+  sensitive = false,
+): Promise<SessionScore> {
   const result = await runTask("answer_scoring", {
     json: true,
     temperature: 0.2,
+    sensitive,
     ...buildScoringPrompt(rounds, withModelAnswers),
   });
 

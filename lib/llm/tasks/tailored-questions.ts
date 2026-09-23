@@ -26,10 +26,11 @@ export async function generateTailoredQuestions({
   role,
   level,
   tailoring,
+  focus,
   random = Math.random,
 }: GenerateQuestionsInput & { tailoring: Tailoring }): Promise<{ questions: GeneratedQuestion[]; provider: string }> {
   const plan = planTailoredRound(track, level, tailoring, random);
-  const prompt = buildQuestionPrompt({ track, role, level, plan, tailoring });
+  const prompt = buildQuestionPrompt({ track, role, level, plan, tailoring, focus });
 
   const result = await runTask("tailored_question_generation", {
     json: true,

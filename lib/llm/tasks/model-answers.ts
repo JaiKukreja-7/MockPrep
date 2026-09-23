@@ -8,9 +8,15 @@ import {
 } from "./score-answer";
 
 /**
- * Model answers as a call of their own — the fallback if folding them into
- * the scoring call ever stops being reliable. The instruction itself lives
- * in score-answer.ts and is shared, so the two routes cannot drift.
+ * Model answers as a call of their own.
+ *
+ * MEASUREMENT ONLY — nothing in the app calls this. It exists so
+ * tests/integration/model-answer-route.test.ts can compare the two routes
+ * against real providers, and as the ready-made fallback if folding them
+ * into the scoring call ever stops being reliable. To adopt it, call it from
+ * scoreSession instead of passing `withModelAnswers` to scoreRounds. The
+ * instruction itself lives in score-answer.ts and is shared, so the two
+ * routes cannot drift.
  *
  * Not sensitive, and on the same chain as scoring: the inputs are exactly
  * what scoring already sees — the question (stored, and contact-redacted at
@@ -19,7 +25,10 @@ import {
  *
  * See PROGRESS.md for the measurement that chose folded over separate.
  */
-export async function modelAnswers(rounds: RoundToScore[]): Promise<{
+export async function modelAnswers(
+  rounds: RoundToScore[],
+  sensitive = false,
+): Promise<{
   answers: Map<number, string>;
   provider: string;
 }> {
@@ -36,6 +45,7 @@ export async function modelAnswers(rounds: RoundToScore[]): Promise<{
   const result = await runTask("answer_scoring", {
     json: true,
     temperature: 0.2,
+    sensitive,
     system:
       "You are an interview coach showing a candidate what a strong answer " +
       "sounds like. You are specific and unsentimental, and you never " +

@@ -26,8 +26,14 @@ export interface ExtractedFlag {
  * is reliable at "line 3", and unreliable at reproducing "00:38" exactly.
  * The caller maps indexes back to rows.
  */
+/**
+ * @param sensitive True when the round was tailored to a resume. The lines
+ * include the interviewer's questions, which on a tailored round name the
+ * candidate's own projects — so this call is raised with the rest.
+ */
 export async function extractFlags(
   lines: TranscriptLine[],
+  sensitive = false,
 ): Promise<{ flags: ExtractedFlag[]; provider: string }> {
   const candidateLines = lines.filter((l) => l.speaker === "candidate");
   if (candidateLines.length === 0) return { flags: [], provider: "skipped" };
@@ -39,6 +45,7 @@ export async function extractFlags(
   const result = await runTask("flag_extraction", {
     json: true,
     temperature: 0.1,
+    sensitive,
     system:
       "You mark habits in interview transcripts. Return only JSON. " +
       "No commentary, no markdown fences.",
