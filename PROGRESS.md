@@ -1160,11 +1160,24 @@ no longer be corrected through the API — needs a SQL console.
 
 ## Next
 
-1. **CI is failing at `npm ci` on every push** and has been since at least
-   step 14 — all three jobs, every commit. `npm ci` succeeds from a clean
-   clone locally (Node 24.12, npm 11.6), the lockfile is in sync and carries
-   the linux binaries, so the cause is only in the runner log, which needs
-   admin rights to read. Nothing has been verified by CI since then.
+1. **Watch CI on the next push.** It had been failing at `npm ci` on every
+   commit since at least step 14 — all three jobs — with
+   `Missing: @emnapi/runtime@1.11.3 from lock file` and the same for
+   `@emnapi/core`. Those are dependencies of the **wasm32** fallback builds
+   of sharp, `@tailwindcss/oxide` and `unrs-resolver`. A lockfile generated
+   on macOS arm64 never resolves that branch, so npm pruned them; linux
+   resolves it and finds the entries missing. The fix was to regenerate the
+   lockfile (`rm package-lock.json && npm install`), which hoists
+   `@emnapi/core` and `@emnapi/runtime@1.11.3` to the top level. It also
+   refreshed 77 transitive versions inside their existing ranges —
+   `@supabase/*` 2.115 → 2.117, `@types/react` 19.2 → 19.3, and similar;
+   `next` and `react` are pinned and did not move. Everything was re-run
+   against the regenerated tree from a bare `npm ci`: typecheck, lint, 237
+   unit, 13 integration, 36 e2e, production build.
+
+   *Not reproducible on macOS:* `npm ci --dry-run --os=linux --cpu=x64`
+   passes on the OLD lockfile too, so the platform flags do not stand in
+   for the platform. The proof that this is fixed is CI going green.
 2. **Watch the follow-up rate in real rounds** with `npm run
    measure:follow-up` if it ever feels off — the corpus and the thresholds
    are in `tests/integration/follow-up-rate.test.ts`.
