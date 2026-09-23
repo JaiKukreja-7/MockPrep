@@ -191,3 +191,37 @@ describe("a resume-tailored round requires an account (sessions_resume_requires_
     expect(flipped ?? []).toEqual([]);
   });
 });
+
+describe("rounds.model_answer", () => {
+  it("stores a model answer alongside the score, and needs its migration", async () => {
+    const { data: session } = await supabase
+      .from("sessions")
+      .insert({ user_id: userId, title: "x" })
+      .select("id")
+      .single();
+    const { error } = await supabase.from("rounds").insert({
+      session_id: session!.id,
+      ordinal: 1,
+      question: "Two-sum?",
+      score: 62,
+      score_detail: { approach: 80, complexity: 50, edge_cases: 56 },
+      model_answer: "I'd use two pointers from both ends: O(n) time, O(1) space.",
+    });
+    if (error?.code === "PGRST204") {
+      throw new Error(
+        "rounds.model_answer is missing — apply supabase/migrations/20260923000000_model_answers.sql.",
+      );
+    }
+    expect(error).toBeNull();
+
+    const { data: row } = await supabase
+      .from("rounds")
+      .select("score, model_answer")
+      .eq("session_id", session!.id)
+      .single();
+    expect(row).toEqual({
+      score: 62,
+      model_answer: "I'd use two pointers from both ends: O(n) time, O(1) space.",
+    });
+  });
+});

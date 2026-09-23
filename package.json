@@ -12,7 +12,8 @@
     "test:integration": "vitest run --project integration",
     "test:e2e": "next build && vitest run --project e2e",
     "test:coverage": "vitest run --project unit --project integration --coverage",
-    "measure:follow-up": "FOLLOW_UP_RATE=1 FOLLOW_UP_REPEATS=3 vitest run --project integration tests/integration/follow-up-rate.test.ts --reporter=verbose"
+    "measure:follow-up": "FOLLOW_UP_RATE=1 FOLLOW_UP_REPEATS=3 vitest run --project integration tests/integration/follow-up-rate.test.ts --reporter=verbose",
+    "measure:model-answers": "MODEL_ANSWER_ROUTE=1 vitest run --project integration tests/integration/model-answer-route.test.ts --reporter=verbose"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

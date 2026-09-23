@@ -83,6 +83,8 @@ export type RoundRow = {
   topic: string | null;
   /** Where a tailored question came from; null for the standard plan. */
   source: QuestionSource | null;
+  /** What a strong answer would have been. Written with the score. */
+  model_answer: string | null;
   /** The one probing follow-up; non-null spends the cap. */
   follow_up: string | null;
   /** Per-round content score under the type's rubric. */
@@ -198,7 +200,7 @@ export interface Database {
       };
       rounds: {
         Row: RoundRow;
-        Insert: Writable<RoundRow, "id" | "created_at", "asked_at" | "answered_at" | "mode" | "question_type" | "topic" | "source" | "follow_up" | "score" | "score_detail">;
+        Insert: Writable<RoundRow, "id" | "created_at", "asked_at" | "answered_at" | "mode" | "question_type" | "topic" | "source" | "follow_up" | "score" | "score_detail" | "model_answer">;
         Update: Partial<RoundRow>;
         Relationships: [
           {

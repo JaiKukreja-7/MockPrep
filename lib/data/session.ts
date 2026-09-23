@@ -130,6 +130,8 @@ export interface ReportRound {
   topic: string | null;
   source: QuestionSource | null;
   followUp: string | null;
+  /** What a strong answer would have been. Written with the score. */
+  modelAnswer: string | null;
   score: number | null;
   detail: Record<string, number> | null;
 }
@@ -156,7 +158,7 @@ export async function getReport(id: string): Promise<ReportView | null> {
       .maybeSingle(),
     supabase
       .from("rounds")
-      .select("id, ordinal, question, question_type, topic, source, follow_up, score, score_detail")
+      .select("id, ordinal, question, question_type, topic, source, follow_up, score, score_detail, model_answer")
       .eq("session_id", id)
       .order("ordinal", { ascending: true }),
     supabase
@@ -185,6 +187,7 @@ export async function getReport(id: string): Promise<ReportView | null> {
       topic: r.topic,
       source: r.source,
       followUp: r.follow_up,
+      modelAnswer: r.model_answer,
       score: r.score,
       detail: r.score_detail,
     })),

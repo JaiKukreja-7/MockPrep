@@ -1,7 +1,7 @@
 import "server-only";
 import { runTask } from "../index";
 import { parseJson } from "../json";
-import type { QuestionType } from "@/lib/supabase/types";
+import type { ExperienceLevel, QuestionType } from "@/lib/supabase/types";
 
 /**
  * What each kind of answer is judged on. The session-level delivery axes —
@@ -47,6 +47,8 @@ export interface RoundToScore {
   ordinal: number;
   type: QuestionType;
   topic: string | null;
+  /** Pitches the model answer at the candidate, not at a senior engineer. */
+  level: ExperienceLevel;
   question: string;
   answer: string;
   /** The probing follow-up, if one was asked, and what they said to it. */
@@ -59,6 +61,8 @@ export interface RoundScore {
   /** Mean of the rubric axes — derived here, never asked of the model. */
   score: number;
   detail: Record<string, number>;
+  /** What a strong answer would have been. Null when it did not come back. */
+  modelAnswer: string | null;
 }
 
 export interface SessionScore {
@@ -78,11 +82,18 @@ const clamp = (n: unknown): number => {
   return Math.max(0, Math.min(100, Math.round(value)));
 };
 
+/**
+ * How long a model answer may be. It is a lesson, not an essay: long enough
+ * for an approach, its complexity and its edge cases, short enough to read
+ * under a score. Enforced here, after the model, not only asked for.
+ */
+export const MAX_MODEL_ANSWER_CHARS = 900;
+
 /** Exported so the prompt's structure can be asserted without a model. */
-export function buildScoringPrompt(rounds: RoundToScore[]) {
+export function buildScoringPrompt(rounds: RoundToScore[], withModelAnswers = true) {
   const exchange = rounds
     .map((r) => {
-      const head = `### Question ${r.ordinal} — type ${r.type}${r.topic ? ` (${r.topic})` : ""}`;
+      const head = `### Question ${r.ordinal} — type ${r.type}${r.topic ? ` (${r.topic})` : ""}, asked at the "${r.level}" level`;
       const lines = [`Q: ${r.question}`, `A: ${r.answer}`];
       if (r.followUp) lines.push(`Follow-up: ${r.followUp}`, `A: ${r.followUpAnswer ?? "(no answer)"}`);
       return `${head}\nRubric: ${RUBRIC_GUIDE[r.type]}\n${lines.join("\n")}`;
@@ -90,7 +101,12 @@ export function buildScoringPrompt(rounds: RoundToScore[]) {
     .join("\n\n");
 
   const shape = rounds
-    .map((r) => `{"ordinal": ${r.ordinal}, "detail": {${RUBRIC[r.type].map((k) => `"${k}": 0`).join(", ")}}}`)
+    .map(
+      (r) =>
+        `{"ordinal": ${r.ordinal}, "detail": {${RUBRIC[r.type].map((k) => `"${k}": 0`).join(", ")}}` +
+        (withModelAnswers ? `, "model_answer": "..."` : "") +
+        `}`,
+    )
     .join(", ");
 
   return {
@@ -107,6 +123,7 @@ export function buildScoringPrompt(rounds: RoundToScore[]) {
       `content against the rubric given with the question, and count the ` +
       `follow-up answer where there is one.\n\n` +
       `${exchange}\n\n` +
+      (withModelAnswers ? modelAnswerInstruction(rounds) : "") +
       `Also write one sentence, addressed to the candidate, naming the single ` +
       `biggest thing to fix across the round. Sentence case.\n\n` +
       `Return exactly this shape:\n` +
@@ -115,16 +132,56 @@ export function buildScoringPrompt(rounds: RoundToScore[]) {
 }
 
 /**
+ * The model-answer instruction. Shared by the folded scoring prompt and the
+ * standalone task so the two cannot drift: whichever route is taken, the
+ * answer on the report was asked for in the same words.
+ *
+ * It is written against THIS candidate's answer rather than as a model ideal
+ * — an answer that silently supplies what they already said teaches nothing.
+ */
+export function modelAnswerInstruction(rounds: RoundToScore[]): string {
+  const axes = [...new Set(rounds.map((r) => r.type))]
+    .map((type) => `  ${type}: ${RUBRIC[type].join(", ")}`)
+    .join("\n");
+  return (
+    `For each question also write model_answer: what a strong answer from ` +
+    `this candidate would have sounded like, in the first person, as they ` +
+    `would say it aloud.\n` +
+    `- Cover that question type's rubric axes and nothing else:\n${axes}\n` +
+    `- Pitch it at their level. A stronger answer, not a senior engineer's.\n` +
+    `- Build on what they actually said: keep what was right, and make the ` +
+    `part they missed the part that stands out. Where the question is about ` +
+    `their own experience — a project, a claim, something on their resume — ` +
+    `use the specifics they gave rather than inventing a different project.\n` +
+    `- One short paragraph, or two or three labelled lines. Under ` +
+    `${MAX_MODEL_ANSWER_CHARS} characters. No preamble, no "a strong answer ` +
+    `would", no markdown.\n\n`
+  );
+}
+
+/** Trims a model answer to the stored shape, or drops it. */
+export function sanitiseModelAnswer(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const text = raw.trim().replace(/^```[a-z]*\n?|```$/g, "").trim();
+  if (text.length < 40) return null;
+  if (text.length <= MAX_MODEL_ANSWER_CHARS) return text;
+  // Cut at the last sentence end that fits, so a trimmed answer still lands.
+  const cut = text.slice(0, MAX_MODEL_ANSWER_CHARS);
+  const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("\n"));
+  return (stop > MAX_MODEL_ANSWER_CHARS / 2 ? cut.slice(0, stop + 1) : cut).trim();
+}
+
+/**
  * One call for the whole session: delivery for the round, content per
  * question. Every number that reaches the screen is derived from what the
  * model returned per axis, never asked for as a total — an overall the model
  * invents separately can contradict its own parts.
  */
-export async function scoreRounds(rounds: RoundToScore[]): Promise<SessionScore> {
+export async function scoreRounds(rounds: RoundToScore[], withModelAnswers = true): Promise<SessionScore> {
   const result = await runTask("answer_scoring", {
     json: true,
     temperature: 0.2,
-    ...buildScoringPrompt(rounds),
+    ...buildScoringPrompt(rounds, withModelAnswers),
   });
 
   const parsed = parseJson<Record<string, unknown>>(result.text);
@@ -156,6 +213,7 @@ export async function scoreRounds(rounds: RoundToScore[]): Promise<SessionScore>
       ordinal: r.ordinal,
       score: Math.round(values.reduce((a, b) => a + b, 0) / values.length),
       detail,
+      modelAnswer: sanitiseModelAnswer(byOrdinal.get(r.ordinal)?.model_answer),
     };
   });
 

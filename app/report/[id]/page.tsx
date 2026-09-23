@@ -201,6 +201,20 @@ export default async function ReportPage({ params }: PageProps<"/report/[id]">) 
                     trailing={
                       <span className="numeric text-u-lg font-medium">{round.score}</span>
                     }
+                    footer={
+                      /* Secondary by default: the score is the headline, the
+                         lesson is one click under it. Written against this
+                         answer at scoring time, so it names what this
+                         candidate missed rather than reciting an ideal. */
+                      round.modelAnswer ? (
+                        <details className="disclosure mt-4">
+                          <summary className="link eyebrow">What a strong answer sounds like</summary>
+                          <p className="mt-4 max-w-3xl whitespace-pre-line text-u-body">
+                            {round.modelAnswer}
+                          </p>
+                        </details>
+                      ) : null
+                    }
                   />
                 ))}
               </RuledRowList>

@@ -35,6 +35,12 @@ export interface RuledRowProps
    */
   progress?: number;
   /**
+   * A block beneath the title/trailing line, inside the same row and above
+   * its rule. For prose that does not fit `meta` — the report's model
+   * answer. Full width, so it is not squeezed by the trailing slot.
+   */
+  footer?: ReactNode;
+  /**
    * On narrow screens, drop the trailing slot beneath the title instead of
    * squeezing the title beside it. For wide slots — a pill plus a score, a
    * reserved flag column. A lone number on a meter row does not need it.
@@ -50,6 +56,7 @@ export function RuledRow({
   title,
   meta,
   trailing,
+  footer,
   scale = "display",
   progress,
   stackTrailing = false,
@@ -91,6 +98,7 @@ export function RuledRow({
         </span>
       ) : null}
 
+      {footer ? <span className="w-full">{footer}</span> : null}
       {hasProgress ? (
         // aria-hidden: the value is already rendered as text in `trailing`,
         // so announcing the bar too would just repeat it.

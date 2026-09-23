@@ -38,8 +38,8 @@ beforeEach(() => {
   scoreRounds.mockReset().mockResolvedValue({
     overall: 55, structure: 55, specificity: 60, pace: 50, note: "",
     rounds: [
-      { ordinal: 1, score: 40, detail: { situation: 40, action: 40, result: 40 } },
-      { ordinal: 2, score: 70, detail: { approach: 90, complexity: 60, edge_cases: 60 } },
+      { ordinal: 1, score: 40, detail: { situation: 40, action: 40, result: 40 }, modelAnswer: "I'd name the project, say what I did, and land a number." },
+      { ordinal: 2, score: 70, detail: { approach: 90, complexity: 60, edge_cases: 60 }, modelAnswer: null },
     ],
   });
   extractFlags.mockReset().mockResolvedValue({ flags: [], provider: "groq/m" });
@@ -48,7 +48,9 @@ beforeEach(() => {
       ? { data: lines }
       : op.table === "rounds" && has(op, "select")
         ? { data: roundRows }
-        : {};
+        : op.table === "sessions" && has(op, "select")
+          ? { data: { level: "junior" } }
+          : {};
 });
 
 describe("scoreSession", () => {
@@ -79,14 +81,23 @@ describe("scoreSession", () => {
     // The scorer saw each round with its type and its own candidate answer.
     const [toScore] = scoreRounds.mock.calls[0] as [Array<Record<string, unknown>>];
     expect(toScore).toEqual([
-      { ordinal: 1, type: "behavioural", topic: null, question: "Tell me about a time…", answer: "So, um, I guess…", followUp: null, followUpAnswer: null },
-      { ordinal: 2, type: "dsa", topic: "arrays", question: "And the result?", answer: "It went well.", followUp: null, followUpAnswer: null },
+      { ordinal: 1, type: "behavioural", level: "junior", topic: null, question: "Tell me about a time…", answer: "So, um, I guess…", followUp: null, followUpAnswer: null },
+      { ordinal: 2, type: "dsa", level: "junior", topic: "arrays", question: "And the result?", answer: "It went well.", followUp: null, followUpAnswer: null },
     ]);
-    // …and each round got its score and rubric detail written back.
+    // …and each round got its score, rubric detail and model answer written
+    // back in one statement — a report never shows one without the other.
     const roundUpdates = recorded.ops.filter((o) => o.table === "rounds" && has(o, "update"));
     expect(roundUpdates.map((o) => [argsOf(o, "update")![0], argsOf(o, "eq")])).toEqual([
-      [{ score: 40, score_detail: { situation: 40, action: 40, result: 40 } }, ["id", "r1"]],
-      [{ score: 70, score_detail: { approach: 90, complexity: 60, edge_cases: 60 } }, ["id", "r2"]],
+      [
+        {
+          score: 40,
+          score_detail: { situation: 40, action: 40, result: 40 },
+          model_answer: "I'd name the project, say what I did, and land a number.",
+        },
+        ["id", "r1"],
+      ],
+      // A round the model gave no usable answer for stores null, not a gap.
+      [{ score: 70, score_detail: { approach: 90, complexity: 60, edge_cases: 60 }, model_answer: null }, ["id", "r2"]],
     ]);
     // …and the flag extractor saw the same lines, indexed from 0.
     expect(extractFlags.mock.calls[0][0]).toEqual(lines.map((l, index) => ({ index, speaker: l.speaker, body: l.body })));
@@ -100,7 +111,8 @@ describe("scoreSession", () => {
     const flagUpdates = recorded.ops.filter((o) => o.table === "transcripts" && called(o, "update", { flag: "filler" }) || (o.table === "transcripts" && called(o, "update", { flag: "no_number" })));
     expect(flagUpdates.map((o) => argsOf(o, "eq"))).toEqual([["id", "l1"], ["id", "l3"]]);
 
-    const close = recorded.ops.find((o) => o.table === "sessions");
+    // The first sessions op is the level read; the close is the update.
+    const close = recorded.ops.find((o) => o.table === "sessions" && has(o, "update"));
     const [patch] = argsOf(close!, "update") as [Record<string, unknown>];
     expect(patch.status).toBe("scored");
     expect(patch.duration_seconds).toBe(137);
@@ -117,6 +129,7 @@ describe("scoreSession", () => {
     });
     warn.mockRestore();
     expect(recorded.ops.some((o) => o.table === "scores")).toBe(false);
-    expect(recorded.ops.some((o) => o.table === "sessions")).toBe(false);
+    // The level read is a select; nothing is written to the session.
+    expect(recorded.ops.some((o) => o.table === "sessions" && has(o, "update"))).toBe(false);
   });
 });

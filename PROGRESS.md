@@ -337,6 +337,56 @@ Note for the machine, not the product: `~/Desktop/nutriscan`'s `next dev`
 holds port 3000 whenever it is free; MockPrep's dev server runs on 3010
 here until that is closed.
 
+### Model answers on the report (step 18, 2026-09-23)
+
+Every scored question now carries what a strong answer would have sounded
+like, written against *that candidate's* answer rather than as an ideal.
+
+- **Folded into the scoring call, measured not assumed.**
+  `tests/integration/model-answer-route.test.ts` (`npm run
+  measure:model-answers`) runs both routes on a fixed four-question round
+  and counts clean runs: every round answered, under the length cap, no
+  preamble, no markdown — and, for the folded route, the scores alongside
+  still complete, which is the failure it exists to catch. Two measurement
+  runs of three repeats: **folded 6/6, separate 6/6**. Folded is one fewer
+  provider call per round, so it wins the tie. `lib/llm/tasks/
+  model-answers.ts` stays as the standalone fallback and shares the
+  instruction text with the folded prompt so the two cannot drift; the
+  test asserts folded ≥ separate, so a model change that flips it fails.
+- **The instruction** (`modelAnswerInstruction`) names only the rubric axes
+  of the types this round actually asked, each type once; pitches the
+  answer at the session's level; tells the model to keep what was right and
+  make the missing part the part that stands out; and, where the question
+  is about the candidate's own experience, to use the specifics they gave
+  rather than inventing a project — which is what makes a tailored round's
+  resume question come back about their project. Capped at
+  `MAX_MODEL_ANSWER_CHARS` 900, enforced by `sanitiseModelAnswer` after the
+  model, cutting at the last sentence that fits.
+- **Stored once, with the score,** in the same `rounds` update
+  (`model_answer`, migration `20260923000000_model_answers.sql`), so a
+  report never shows a score without its lesson or the reverse. Null on
+  rounds scored before this existed and on any round the model gave nothing
+  usable for; the report omits the row.
+- **On the report**, a native `<details>` in a new `footer` slot on
+  `RuledRow` — full width, inside the row, above its rule. Collapsed by
+  default: the score stays the headline at `--u-lg`, the answer is
+  `--u-body` behind one click. The summary reuses `.eyebrow` + `.link`, so
+  it gets step 17's bar and focus ring for free; `.disclosure` is one CSS
+  rule removing the marker.
+- Inputs are exactly what scoring already sees — the stored question
+  (contact-redacted at write time on a tailored round) and the candidate's
+  own answer. No resume text reaches this, so it stays on the
+  non-sensitive `answer_scoring` route and nothing new is exposed.
+- Verified on a real scored guest round: four questions, four model answers,
+  each addressing the actual gap (a hash-map answer to a shortest-path
+  question came back with Dijkstra, a min-heap, O((V+E) log V), and
+  unreachable nodes).
+
+*Noticed, not fixed:* the rubric axes in a report row's meta line render in
+jsonb key order (`depth · clarity · accuracy`), not the canonical rubric
+order, because Postgres reorders jsonb keys by length. Pre-existing from
+step 15. Fix is to map `RUBRIC[type]` over the stored object at render.
+
 ### Subtle motion (step 17, 2026-09-22)
 
 Tokens first: `--motion-fast` 150ms, `--motion-slow` 400ms, one curve

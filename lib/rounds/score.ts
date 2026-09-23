@@ -31,7 +31,8 @@ export async function scoreSession(
     };
   }
 
-  const [{ data: lines }, { data: rounds }] = await Promise.all([
+  const [{ data: session }, { data: lines }, { data: rounds }] = await Promise.all([
+    supabase.from("sessions").select("level").eq("id", sessionId).maybeSingle(),
     supabase
       .from("transcripts")
       .select("id, round_id, at_seconds, speaker, body")
@@ -54,6 +55,7 @@ export async function scoreSession(
       ordinal: r.ordinal,
       type: r.question_type,
       topic: r.topic,
+      level: session?.level ?? "fresher",
       question: r.question,
       answer: said[0]?.body ?? "",
       followUp: r.follow_up,
@@ -88,7 +90,12 @@ export async function scoreSession(
       score.rounds.map((rs) => {
         const id = roundById.get(rs.ordinal);
         return id
-          ? supabase.from("rounds").update({ score: rs.score, score_detail: rs.detail }).eq("id", id)
+          ? supabase
+              .from("rounds")
+              // The model answer is written with the score, in the same
+              // statement, so a report never shows one without the other.
+              .update({ score: rs.score, score_detail: rs.detail, model_answer: rs.modelAnswer })
+              .eq("id", id)
           : Promise.resolve();
       }),
     );

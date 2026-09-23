@@ -523,6 +523,20 @@
     width: 100%;
   }
 
+  /* 5b. Disclosure. Native <details>, marker removed: the affordance is
+         the summary's own link bar, so it reads as the one interactive
+         thing in the row. Used for the report's model answers, which are
+         secondary to the score by default and opened one at a time. */
+  .disclosure > summary {
+    list-style: none;
+    cursor: pointer;
+    display: inline-block;
+  }
+
+  .disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+
   /* 6. Tabular numerals everywhere a score appears. */
   .numeric {
     font-variant-numeric: tabular-nums;

@@ -135,3 +135,53 @@ describe("/unavailable", () => {
     expect(hrefs(evil)).toContain("/dashboard");
   });
 });
+
+describe("the report's model answers", () => {
+  const round = {
+    id: "r1",
+    ordinal: 1,
+    question: "Two-sum on a sorted array?",
+    type: "dsa" as const,
+    topic: "two pointers",
+    source: null,
+    followUp: null,
+    modelAnswer: "I'd use two pointers from both ends: O(n) time, O(1) space, and I'd return early on fewer than two elements.",
+    score: 62,
+    detail: { approach: 80, complexity: 50, edge_cases: 56 },
+  };
+
+  const render = async (rounds: NonNullable<ReportView>["rounds"]) => {
+    report = {
+      session: { id: "s1", title: "Backend engineer", track: "engineering", status: "scored", started_at: null, duration_seconds: 600, job_title: null, company: null, tailored_from_resume: false },
+      transcript: [],
+      score: { overall: 70, structure: 70, specificity: 70, pace: 70 },
+      rounds,
+    };
+    const { default: ReportPage } = await import("@/app/report/[id]/page");
+    return renderToStaticMarkup(
+      await ReportPage({ params: Promise.resolve({ id: "s1" }), searchParams: Promise.resolve({}) }),
+    );
+  };
+
+  it("shows one per question, collapsed, under the score", () => {
+    return render([round]).then((html) => {
+      expect(html).toMatch(/<details[^>]*class="disclosure/);
+      expect(html).not.toMatch(/<details[^>]*open/);
+      expect(strip(html)).toMatch(/What a strong answer sounds like/);
+      // renderToStaticMarkup escapes the apostrophe; match either side of it.
+      expect(strip(html)).toMatch(/use two pointers from both ends/);
+      // The score is still the headline: it renders at the row's own size,
+      // the answer at body size.
+      expect(html).toMatch(/numeric text-u-lg font-medium">62</);
+      expect(html).toMatch(/text-u-body">I&#x27;d use two pointers/);
+    });
+  });
+
+  it("omits the disclosure entirely on a round scored before model answers existed", async () => {
+    const html = await render([{ ...round, modelAnswer: null }]);
+    expect(html).not.toMatch(/<details/);
+    expect(strip(html)).not.toMatch(/What a strong answer sounds like/);
+    // …and the score still renders.
+    expect(html).toMatch(/numeric text-u-lg font-medium">62</);
+  });
+});
